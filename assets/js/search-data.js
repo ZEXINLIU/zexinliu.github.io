@@ -30,33 +30,12 @@ ninja.data = [{
           handler: () => {
             window.location.href = "/projects/";
           },
-        },{id: "nav-repositories",
-          title: "repositories",
-          description: "Edit the `_data/repositories.yml` and change the `github_users` and `github_repos` lists to include your own GitHub profile and repositories.",
-          section: "Navigation",
-          handler: () => {
-            window.location.href = "/repositories/";
-          },
         },{id: "nav-cv",
           title: "cv",
           description: "This is a description of the page. You can modify it in &#39;_pages/cv.md&#39;. You can also change or remove the top pdf download button.",
           section: "Navigation",
           handler: () => {
             window.location.href = "/cv/";
-          },
-        },{id: "nav-teaching",
-          title: "teaching",
-          description: "Materials for courses you taught. Replace this text with your description.",
-          section: "Navigation",
-          handler: () => {
-            window.location.href = "/teaching/";
-          },
-        },{id: "nav-people",
-          title: "people",
-          description: "members of the lab or group",
-          section: "Navigation",
-          handler: () => {
-            window.location.href = "/people/";
           },
         },{id: "dropdown-bookshelf",
               title: "bookshelf",
@@ -65,12 +44,12 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/books/";
               },
-            },{id: "dropdown-blog",
-              title: "blog",
+            },{id: "dropdown-teaching",
+              title: "teaching",
               description: "",
               section: "Dropdown",
               handler: () => {
-                window.location.href = "/blog/";
+                window.location.href = "/teaching/";
               },
             },{id: "post-a-post-with-plotly-js",
         
@@ -440,16 +419,21 @@ ninja.data = [{
           description: "",
           section: "Books",handler: () => {
               window.location.href = "/books/the_godfather/";
-            },},{id: "news-a-simple-inline-announcement",
-          title: 'A simple inline announcement.',
-          description: "",
-          section: "News",},{id: "news-a-long-announcement-with-details",
+            },},{id: "news-a-long-announcement-with-details",
           title: 'A long announcement with details',
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_2/";
-            },},{id: "news-a-simple-inline-announcement-with-markdown-emoji-sparkles-smile",
-          title: 'A simple inline announcement with Markdown emoji! :sparkles: :smile:',
+            },},{id: "news-the-sudden-cardiac-arrest-screening-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-ultra",
+          title: 'The sudden cardiac arrest screening feature I developed was introduced on newly released...',
+          description: "",
+          section: "News",handler: () => {
+              window.location.href = "/news/announcement_3/";
+            },},{id: "news-congratulations-to-zexin-for-receiving-the-beijing-high-level-overseas-talent-funding-program",
+          title: 'Congratulations to Zexin for receiving the Beijing High-Level Overseas Talent Funding Program.',
+          description: "",
+          section: "News",},{id: "news-the-honor-watch-5-pro-is-released-with-24-hour-continuous-non-invasive-blood-pressure-monitoring-feature-sparkles-as-the-lead-developer-i-am-honored-to-declare-that-it-has-met-the-us-association-for-the-advancement-of-medical-instrumentation-aami-standard-after-calibration-smile",
+          title: 'The Honor Watch 5 Pro is released with 24-hour continuous non-invasive blood pressure...',
           description: "",
           section: "News",},{id: "projects-project-1",
           title: 'project 1',

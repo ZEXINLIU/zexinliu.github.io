@@ -1,8 +1,8 @@
 ---
 layout: post
-date: 2015-10-22 15:59:00-0400
+date: 2025-10-15 19:00:00-0400
 inline: true
 related_posts: false
 ---
 
-A simple inline announcement.
+The Honor Watch 5 Pro is released with 24-hour continuous non-invasive blood pressure monitoring feature :sparkles:. As the lead developer, I am honored to declare that it has met the US Association for the Advancement of Medical Instrumentation (AAMI) standard after calibration :smile:.

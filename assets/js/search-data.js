@@ -424,7 +424,10 @@ ninja.data = [{
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_2/";
-            },},{id: "news-the-sudden-cardiac-arrest-screening-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-ultra",
+            },},{id: "news-congratulations-to-zexin-on-receiving-the-breakthrough-award-from-honor-for-the-groundbreaking-work-in-non-invasive-blood-pressure-prediction-sparkles",
+          title: 'Congratulations to Zexin on receiving the Breakthrough Award from HONOR for the groundbreaking...',
+          description: "",
+          section: "News",},{id: "news-the-sudden-cardiac-arrest-screening-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-ultra",
           title: 'The sudden cardiac arrest screening feature I developed was introduced on newly released...',
           description: "",
           section: "News",handler: () => {

@@ -3,121 +3,11 @@
 
 @string{aps = {American Physical Society,}}
 
-@book{einstein1920relativity,
-  title={Relativity: the Special and General Theory},
-  author={Einstein, Albert},
-  year={1920},
-  publisher={Methuen & Co Ltd},
-  html={relativity.html}
-}
-
-@book{einstein1956investigations,
-  bibtex_show={true},
-  title={Investigations on the Theory of the Brownian Movement},
-  author={Einstein, Albert},
-  year={1956},
-  publisher={Courier Corporation},
-  preview={brownian-motion.gif}
-}
-
-@article{einstein1950meaning,
-  abbr={AJP},
-  bibtex_show={true},
-  title={The meaning of relativity},
-  author={Einstein, Albert and Taub, AH},
-  journal={American Journal of Physics},
-  volume={18},
-  number={6},
-  pages={403--404},
-  year={1950},
-  publisher={American Association of Physics Teachers}
-}
-
-@article{PhysRev.47.777,
-  abbr={PhysRev},
-  title={Can Quantum-Mechanical Description of Physical Reality Be Considered Complete?},
-  author={Einstein*†, A. and Podolsky*, B. and Rosen*, N.},
-  abstract={In a complete theory there is an element corresponding to each element of reality. A sufficient condition for the reality of a physical quantity is the possibility of predicting it with certainty, without disturbing the system. In quantum mechanics in the case of two physical quantities described by non-commuting operators, the knowledge of one precludes the knowledge of the other. Then either (1) the description of reality given by the wave function in quantum mechanics is not complete or (2) these two quantities cannot have simultaneous reality. Consideration of the problem of making predictions concerning a system on the basis of measurements made on another system that had previously interacted with it leads to the result that if (1) is false then (2) is also false. One is thus led to conclude that the description of reality as given by a wave function is not complete.},
-  journal={Phys. Rev.},
-  location={New Jersey},
-  volume={47},
-  issue={10},
-  pages={777--780},
-  numpages={0},
-  year={1935},
-  month={May},
-  publisher=aps,
-  doi={10.1103/PhysRev.47.777},
-  url={http://link.aps.org/doi/10.1103/PhysRev.47.777},
-  html={https://journals.aps.org/pr/abstract/10.1103/PhysRev.47.777},
-  pdf={example_pdf.pdf},
-  altmetric={248277},
-  dimensions={true},
-  google_scholar_id={qyhmnyLat1gC},
-  video={https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ},
-  additional_info={. *More Information* can be [found here](https://github.com/alshedivat/al-folio/)},
-  annotation={* Example use of superscripts<br>† Albert Einstein},
-  selected={true},
-  inspirehep_id = {3255}
-}
-
-@article{einstein1905molekularkinetischen,
-  title={{\"U}ber die von der molekularkinetischen Theorie der W{\"a}rme geforderte Bewegung von in ruhenden Fl{\"u}ssigkeiten suspendierten Teilchen},
-  author={Einstein, A.},
-  journal={Annalen der physik},
-  volume={322},
-  number={8},
-  pages={549--560},
-  year={1905},
-  publisher={Wiley Online Library}
-}
-
-@article{einstein1905movement,
-  abbr={Ann. Phys.},
-  title={Un the movement of small particles suspended in statiunary liquids required by the molecular-kinetic theory 0f heat},
-  author={Einstein, A.},
-  journal={Ann. Phys.},
-  volume={17},
-  pages={549--560},
-  year={1905}
-}
-
-@article{einstein1905electrodynamics,
-  title={On the electrodynamics of moving bodies},
-  author={Einstein, A.},
-  year={1905}
-}
-
-@Article{einstein1905photoelectriceffect,
-  bibtex_show={true},
-  abbr={Ann. Phys.},
-  title="{{\"U}ber einen die Erzeugung und Verwandlung des Lichtes betreffenden heuristischen Gesichtspunkt}",
-  author={Albert Einstein},
-  abstract={This is the abstract text.},
-  journal={Ann. Phys.},
-  volume={322},
-  number={6},
-  pages={132--148},
-  year={1905},
-  doi={10.1002/andp.19053220607},
-  award={Albert Einstein receveid the **Nobel Prize in Physics** 1921 *for his services to Theoretical Physics, and especially for his discovery of the law of the photoelectric effect*},
-  award_name={Nobel Prize}
-}
-
-@book{przibram1967letters,
-  bibtex_show={true},
-  title={Letters on wave mechanics},
-  author={Einstein, Albert and Schrödinger, Erwin and Planck, Max and Lorentz, Hendrik Antoon and Przibram, Karl},
-  year={1967},
-  publisher={Vision},
-  preview={wave-mechanics.gif},
-  abbr={Vision}
-}
-
 @INPROCEEDINGS{9344443,
   abbr={CinC},
   bibtex_show={true},
   author={Rupp, Lindsay C and Liu, Zexin and Bergquist, Jake A and Rampersad, Sumientra and White, Dan and Tate, Jess D and Brooks, Dana H and Narayan, Akil and MacLeod, Rob S},
+  abstract={Cardiac simulations have become increasingly accurate at representing physiological processes. However, simulations often fail to capture the impact of parameter uncertainty in predictions. Uncertainty quantification (UQ) is a set of techniques that captures variability in simulation output based on model assumptions. Although many UQ methods exist, practical implementation can be challenging. We created UncertainSCI, a UQ framework that uses polynomial chaos (PC) expansion to model the forward stochastic error in simulations parameterized with random variables. UncertainSCI uses non-intrusive methods that parsimoniously explores parameter space. The result is an efficient, stable, and accurate PC emulator that can be analyzed to compute output statistics. We created a Python API to run UncertainSCI, minimizing user inputs needed to guide the UQ process. We have implemented UncertainSCI to: (1) quantify the sensitivity of computed torso potentials using the boundary element method to uncertainty in the heart position, and (2) quantify the sensitivity of computed torso potentials using the finite element method to uncertainty in the conductivities of biological tissues. With UncertainSCI, it is possible to evaluate the robustness of simulations to parameter uncertainty and establish realistic expectations on the accuracy of the model results and the clinical guidance they can provide.},
   booktitle={2020 Computing in Cardiology}, 
   title={Using UncertainSCI to Quantify Uncertainty in Cardiac Simulations}, 
   year={2020},
@@ -125,7 +15,10 @@
   number={},
   pages={1-4},
   keywords={Torso;Uncertain systems;Uncertainty;Sensitivity;Computational modeling;Biological system modeling;Stochastic processes},
-  doi={10.22489/CinC.2020.275}}
+  publisher={IEEE},
+  doi={10.22489/CinC.2020.275},
+  google_scholar_id={u-x6o8ySG0sC}
+  }
 
 @article{Liu2021ttr,
   abbr={JSC},
@@ -145,6 +38,7 @@
   url={hhttps://doi.org/10.1007/s10915-021-01586-w},
   additional_info={. *More Information* can be [found here](https://github.com/ZEXINLIU/Uni_ttr_examples)},
   selected={true},
+  google_scholar_id={u5HHmVD_uO8C}
 }
 
 @article{uncertainsci2021brain,
@@ -152,7 +46,9 @@
   bibtex_show={true},
   title="{Uncertainty Quantification in Brain Stimulation using UncertainSCI}",
   author={Tate, Jess and Rampersad Sumientra and Charlebois, Chantel and Liu, Zexin and Bergquist, Jake and White, Dan and Rupp, Lindsay and Brooks, Dana and Narayan, Akil and MacLeod, Rob},
-  abstract={},
+  abstract={Predicting the effects of brain stimulation with computer models presents many challenges, including estimating the possible error from the propagation of uncertain input parameters through the model. Quantification and control of these errors through uncertainty quantification (UQ) provide statistics on the likely impact of parameter variation on solution accuracy, including total variance and sensitivity associated to each parameter. While the need and importance of UQ in clinical modeling is generally accepted, tools for implementing UQ techniques remain limited or inaccessible for many researchers.
+We have developed UncertainSCI as an open-source, flexible, and easy-to-use tool to make modern UQ techniques more accessible in biomedical simulation applications. Our goals in developing UncertainSCI were to provide numerical accuracy, a simple application programming interface (API), adaptability to many applications and methods, and an interface with diverse simulation software. UncertainSCI implements polynomial chaos expansion (PCE) to estimate uncertainty of a model non-invasively, allowing UQ with a vast array of modeling applications, and uses Python to create a simple API that can interface with many simulation packages.
+To demonstrate the functionality and adaptability of UncertainSCI, we implemented UQ on three brain stimulation modeling pipelines: electrocorticography (ECoG) stimulation, transcranial current stimulation (tCS), and transcranial magnetic stimulation (TMS). We used UncertainSCI to predict the model uncertainty due to variations in tissue conductivities and electrode positions in simulations of ECoG, tCS, and TMS with realistic human head models solved in SCIRun. We compared the results between these modalities and with other UQ packages, which showed that UncertainSCI was equally accurate and more efficient. The UQ predicted by UncertainSCI allows researchers to gain insight into the behavior of these three pipelines as a result of parameter variability and where researchers may focus efforts to improve model accuracy.},
   journal={Brain Stimulation: Basic, Translational, and Clinical Research in Neuromodulation},
   volume={14},
   number={},
@@ -163,7 +59,8 @@
   publisher={Elsevier},
   doi={10.1016/j.brs.2021.10.226},
   url={https://doi.org/10.1016/j.brs.2021.10.226},
-  additional_info={},
+  additional_info={. *More Information* can be [found here](hhttps://github.com/SCIInstitute/UncertainSCI)},
+  google_scholar_id={2osOgNQ5qMEC}
 }
 
 @article{NARAYAN2023106407,
@@ -187,8 +84,10 @@ Results:
 Concentrating on two test cases—modeling bioelectric potentials in the heart and electric stimulation in the brain—we illustrate the use of UncertainSCI to estimate variability, statistics, and sensitivities associated with multiple parameters in these models.
 Conclusion:
 UncertainSCI is a powerful yet lightweight tool enabling sophisticated probing of parametric variability and uncertainty in biomedical simulations. Its non-intrusive pipeline allows users to leverage existing software libraries and suites to accurately ascertain parametric uncertainty in a variety of applications.},
+additional_info={. *More Information* can be [found here](hhttps://github.com/SCIInstitute/UncertainSCI)},
 selected={true},
 publisher={Elsevier},
+google_scholar_id={UeHWp8X0CEIC}
 }
 
 @article{TATE202384249,
@@ -196,7 +95,25 @@ publisher={Elsevier},
   bibtex_show={true},
   title="{UncertainSCI: A Python Package for Noninvasive Parametric Uncertainty Quantification of Simulation Pipelines}",
   author={Tate, Jess and Liu, Zexin and Bergquist, Jake and Rampersad Sumientra and White, Dan and Charlebois, Chantel and Rupp, Lindsay and Brooks, Dana and MacLeod, Rob and Narayan, Akil},
-  abstract={},
+  abstract={We have developed UncertainSCI (UncertainSCI, 2020) as an open-source tool designed to make
+modern uncertainty quantification (UQ) techniques more accessible in biomedical simulation
+applications. UncertainSCI is implemented in Python with a noninvasive interface to meet our
+software design goals of 1) numerical accuracy, 2) simple application programming interface
+(API), 3) adaptability to many applications and methods, and 4) interfacing with diverse
+simulation software. Using a Python implementation in UncertainSCI allowed us to utilize
+the popularity and low barrier-to-entry of Python and its common packages and to leverage
+the built-in integration and support for Python in common simulation software packages and
+languages. Additionally, we used noninvasive UQ techniques and created a similarly noninvasive
+interface to external modeling software that can be called in diverse ways, depending on
+the complexity and level of Python integration in the external simulation pipeline. We have
+developed and included examples applying UncertainSCI to relatively simple 1D simulations
+implemented in Python, and to bioelectric field simulations implemented in external software
+packages, which demonstrate the use of UncertainSCI and the effectiveness of the architecture
+and implementation in achieving our design goals. UnceratainSCI differs from similar software,
+notably UQLab, Uncertainpy, and Simnibs, in that it can be efficiently and non-invasively used
+with external simulation software, specifically with high resolution 3D simulations often used
+in Bioelectric field simulations. Figure 1 illustrates the use of UncertainSCI in computing UQ
+with modeling pipelines for bioelectricity simulations.},
   journal={The Journal of Open Source Software},
   volume={8},
   number={90},
@@ -207,14 +124,15 @@ publisher={Elsevier},
   publisher={The Open Journal},
   doi={10.21105/joss.04249},
   url={https://doi.org/10.21105/joss.04249},
-  additional_info={},
+  additional_info={. *More Information* can be [found here](hhttps://github.com/SCIInstitute/UncertainSCI)},
   selected={true},
+  google_scholar_id={eQOLeE2rZwMC},
 }
 
 @article{doi:10.1137/22M1477131,
 abbr={SISC},
 bibtex_show={true},
-author = {{\textbf{Liu, Zexin}} and Narayan, Akil},
+author = {Liu, Zexin and Narayan, Akil},
 title = {A Stieltjes Algorithm for Generating Multivariate Orthogonal Polynomials},
 journal = {SIAM Journal on Scientific Computing},
 volume = {45},
@@ -227,14 +145,18 @@ publisher={Society for Industrial & Applied Mathematics (SIAM)},
 abstract = { Abstract. Orthogonal polynomials of several variables have a vector-valued three-term recurrence relation, much like the corresponding one-dimensional relation. This relation requires only knowledge of certain recurrence matrices, and allows simple and stable evaluation of multivariate orthogonal polynomials. In the univariate case, various algorithms can stably and accurately evaluate the recurrence coefficients given the ability to compute polynomial moments, but it is difficult to identify analogous procedures in multiple dimensions. We present a new Multivariate Stieltjes (MS) algorithm that fills this gap in the multivariate case, allowing computation of recurrence matrices assuming moments are available. The algorithm is essentially explicit in two and three dimensions, but requires the numerical solution to a nonconvex problem in more than three dimensions. Compared to direct Gram–Schmidt-type orthogonalization, we demonstrate on several examples in up to three dimensions that the MS algorithm is far more stable, and allows accurate computation of orthogonal bases in the multivariate setting, in contrast to direct orthogonalization approaches. },
 additional_info={. *More Information* can be [found here](https://github.com/ZEXINLIU/Multi_ttr_examples)},
 selected={true},
-google_scholar_id={ViwJ6FoAAAAJ},
+google_scholar_id={W7OEmFMy1HYC},
+preview={},
+html={},
+video={},
+pdf={}
 }
 
 @article{Berggren2024,
 abbr={BMMB},
 bibtex_show={true},
 author={Berggren, Caleb C. and Jiang, David and Jack Wang, Y. F. and Bergquist, Jake A. and Rupp, Lindsay C. and Liu, Zexin and MacLeod, Rob and Narayan, Akil and Timmins, Lucas H.},
-title = {A Stieltjes Algorithm for Generating Multivariate Orthogonal Polynomials},
+title = {AInfluence of material parameter variability on the predicted coronary artery biomechanical environment via uncertainty quantification},
 journal = {Biomechanics and Modeling in Mechanobiology},
 volume = {23},
 number = {},
@@ -245,4 +167,5 @@ url= {https://doi.org/10.1007/s10237-023-01814-2},
 publisher={Springer},
 abstract = { Central to the clinical adoption of patient-specific modeling strategies is demonstrating that simulation results are reliable and safe. Indeed, simulation frameworks must be robust to uncertainty in model input(s), and levels of confidence should accompany results. In this study, we applied a coupled uncertainty quantification–finite element (FE) framework to understand the impact of uncertainty in vascular material properties on variability in predicted stresses. Univariate probability distributions were fit to material parameters derived from layer-specific mechanical behavior testing of human coronary tissue. Parameters were assumed to be probabilistically independent, allowing for efficient parameter ensemble sampling. In an idealized coronary artery geometry, a forward FE model for each parameter ensemble was created to predict tissue stresses under physiologic loading. An emulator was constructed within the UncertainSCI software using polynomial chaos techniques, and statistics and sensitivities were directly computed. Results demonstrated that material parameter uncertainty propagates to variability in predicted stresses across the vessel wall, with the largest dispersions in stress within the adventitial layer. Variability in stress was most sensitive to uncertainties in the anisotropic component of the strain energy function. Moreover, unary and binary interactions within the adventitial layer were the main contributors to stress variance, and the leading factor in stress variability was uncertainty in the stress-like material parameter that describes the contribution of the embedded fibers to the overall artery stiffness. Results from a patient-specific coronary model confirmed many of these findings. Collectively, these data highlight the impact of material property variation on uncertainty in predicted artery stresses and present a pipeline to explore and characterize forward model uncertainty in computational biomechanics. },
 additional_info={},
+google_scholar_id={YsMSGLbcyi4C}
 }

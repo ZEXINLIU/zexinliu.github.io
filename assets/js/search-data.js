@@ -429,13 +429,15 @@ ninja.data = [{
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_3/";
-            },},{id: "news-congratulations-to-zexin-for-receiving-the-beijing-high-level-overseas-talent-funding-program",
-          title: 'Congratulations to Zexin for receiving the Beijing High-Level Overseas Talent Funding Program.',
+            },},{id: "news-congratulations-to-zexin-for-receiving-the-beijing-high-level-overseas-talent-funding-program-sparkles",
+          title: 'Congratulations to Zexin for receiving the Beijing High-Level Overseas Talent Funding Program :sparkles:....',
           description: "",
-          section: "News",},{id: "news-the-honor-watch-5-pro-is-released-with-24-hour-continuous-non-invasive-blood-pressure-monitoring-feature-sparkles-as-the-lead-developer-i-am-honored-to-declare-that-it-has-met-the-us-association-for-the-advancement-of-medical-instrumentation-aami-standard-after-calibration-smile",
-          title: 'The Honor Watch 5 Pro is released with 24-hour continuous non-invasive blood pressure...',
+          section: "News",},{id: "news-the-24-hour-continuous-non-invasive-blood-pressure-monitoring-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-pro",
+          title: 'The 24-hour continuous non-invasive blood pressure monitoring feature I developed was introduced on...',
           description: "",
-          section: "News",},{id: "projects-project-1",
+          section: "News",handler: () => {
+              window.location.href = "/news/announcement_1/";
+            },},{id: "projects-project-1",
           title: 'project 1',
           description: "with background image",
           section: "Projects",handler: () => {

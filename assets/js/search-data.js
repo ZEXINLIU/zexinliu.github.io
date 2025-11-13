@@ -497,7 +497,7 @@ ninja.data = [{
         title: 'Instagram',
         section: 'Socials',
         handler: () => {
-          window.open("https://instagram.com/zealousz_xray", "_blank");
+          window.open("https://instagram.com/zealous_xray", "_blank");
         },
       },{
         id: 'social-linkedin',

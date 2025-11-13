@@ -493,6 +493,13 @@ ninja.data = [{
           window.open("mailto:%6C%69%75.%7A%65%78%69%6E%39%35%31%38@%67%6D%61%69%6C.%63%6F%6D", "_blank");
         },
       },{
+        id: 'social-instagram',
+        title: 'Instagram',
+        section: 'Socials',
+        handler: () => {
+          window.open("https://instagram.com/zealousz_xray", "_blank");
+        },
+      },{
         id: 'social-linkedin',
         title: 'LinkedIn',
         section: 'Socials',

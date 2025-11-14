@@ -17,13 +17,14 @@
   keywords={Torso;Uncertain systems;Uncertainty;Sensitivity;Computational modeling;Biological system modeling;Stochastic processes},
   publisher={IEEE},
   doi={10.22489/CinC.2020.275},
+  url={https://ieeexplore.ieee.org/abstract/document/9344443},
   google_scholar_id={u-x6o8ySG0sC}
   }
 
 @article{Liu2021ttr,
   abbr={JSC},
   bibtex_show={true},
-  title="{On the Computation of Recurrence Coefficients for Univariate Orthogonal Polynomials}",
+  title={On the Computation of Recurrence Coefficients for Univariate Orthogonal Polynomials},
   author={Liu, Zexin and Narayan, Akil},
   abstract={Associated to a finite measure on the real line with finite moments are recurrence coefficients in a three-term formula for orthogonal polynomials with respect to this measure. These recurrence coefficients are frequently inputs to modern computational tools that facilitate evaluation and manipulation of polynomials with respect to the measure, and such tasks are foundational in numerical approximation and quadrature. Although the recurrence coefficients for classical measures are known explicitly, those for nonclassical measures must typically be numerically computed. We survey and review existing approaches for computing these recurrence coefficients for univariate orthogonal polynomial families and propose a novel “predictor–corrector” algorithm for a general class of continuous measures. We combine the predictor–corrector scheme with a stabilized Lanczos procedure for a new hybrid algorithm that computes recurrence coefficients for a fairly wide class of measures that can have both continuous and discrete parts. We evaluate the new algorithms against existing methods in terms of accuracy and efficiency.},
   journal={Journal of Scientific Computing},
@@ -34,17 +35,17 @@
   numpages={},
   year={2021},
   publisher={Springer US},
-  doi={110.1007/s10915-021-01586-w},
-  url={https://doi.org/10.1007/s10915-021-01586-w},
+  doi={10.1007/s10915-021-01586-w},
+  url={https://link.springer.com/article/10.1007/s10915-021-01586-w},
   additional_info={. *More Information* can be [found here](https://github.com/ZEXINLIU/Uni_ttr_examples)},
   selected={true},
   google_scholar_id={u5HHmVD_uO8C},
 }
 
-@article{uncertainsci2021brain,
+@article{Tate2021brs,
   abbr={Brain Stimulation},
   bibtex_show={true},
-  title="{Uncertainty Quantification in Brain Stimulation using UncertainSCI}",
+  title={Uncertainty Quantification in Brain Stimulation using UncertainSCI},
   author={Tate, Jess and Rampersad Sumientra and Charlebois, Chantel and Liu, Zexin and Bergquist, Jake and White, Dan and Rupp, Lindsay and Brooks, Dana and Narayan, Akil and MacLeod, Rob},
   abstract={Predicting the effects of brain stimulation with computer models presents many challenges, including estimating the possible error from the propagation of uncertain input parameters through the model. Quantification and control of these errors through uncertainty quantification (UQ) provide statistics on the likely impact of parameter variation on solution accuracy, including total variance and sensitivity associated to each parameter. While the need and importance of UQ in clinical modeling is generally accepted, tools for implementing UQ techniques remain limited or inaccessible for many researchers.
 We have developed UncertainSCI as an open-source, flexible, and easy-to-use tool to make modern UQ techniques more accessible in biomedical simulation applications. Our goals in developing UncertainSCI were to provide numerical accuracy, a simple application programming interface (API), adaptability to many applications and methods, and an interface with diverse simulation software. UncertainSCI implements polynomial chaos expansion (PCE) to estimate uncertainty of a model non-invasively, allowing UQ with a vast array of modeling applications, and uses Python to create a simple API that can interface with many simulation packages.
@@ -58,12 +59,12 @@ To demonstrate the functionality and adaptability of UncertainSCI, we implemente
   year={2021},
   publisher={Elsevier},
   doi={10.1016/j.brs.2021.10.226},
-  url={https://doi.org/10.1016/j.brs.2021.10.226},
+  url={https://www.brainstimjrnl.com/article/S1935-861X(21)00472-1/fulltext},
   additional_info={. *More Information* can be [found here](https://github.com/SCIInstitute/UncertainSCI)},
   google_scholar_id={2osOgNQ5qMEC}
 }
 
-@article{NARAYAN2023106407,
+@article{Narayan2023cbm,
 abbr={CBM},
 bibtex_show={true},
 title = {UncertainSCI: Uncertainty quantification for computational models in biomedicine and bioengineering},
@@ -91,7 +92,7 @@ google_scholar_id={UeHWp8X0CEIC},
 citation={26}
 }
 
-@article{TATE202384249,
+@article{Tate2023joss,
   abbr={JOSS},
   bibtex_show={true},
   title="{UncertainSCI: A Python Package for Noninvasive Parametric Uncertainty Quantification of Simulation Pipelines}",
@@ -124,13 +125,13 @@ with modeling pipelines for bioelectricity simulations.},
   year={2023},
   publisher={The Open Journal},
   doi={10.21105/joss.04249},
-  url={https://doi.org/10.21105/joss.04249},
+  url= {https://joss.theoj.org/papers/10.21105/joss.04249},
   additional_info={. *More Information* can be [found here](https://github.com/SCIInstitute/UncertainSCI)},
   selected={true},
   google_scholar_id={eQOLeE2rZwMC},
 }
 
-@article{doi:10.1137/22M1477131,
+@article{Liu2023sisc,
 abbr={SISC},
 bibtex_show={true},
 author = {Liu, Zexin and Narayan, Akil},
@@ -141,30 +142,26 @@ number = {3},
 pages = {A1125-A1147},
 year = {2023},
 doi = {10.1137/22M1477131},
-url= {https://doi.org/10.1137/22M1477131},
+url = {https://epubs.siam.org/doi/abs/10.1137/22M1477131},
 publisher={Society for Industrial & Applied Mathematics (SIAM)},
 abstract = { Abstract. Orthogonal polynomials of several variables have a vector-valued three-term recurrence relation, much like the corresponding one-dimensional relation. This relation requires only knowledge of certain recurrence matrices, and allows simple and stable evaluation of multivariate orthogonal polynomials. In the univariate case, various algorithms can stably and accurately evaluate the recurrence coefficients given the ability to compute polynomial moments, but it is difficult to identify analogous procedures in multiple dimensions. We present a new Multivariate Stieltjes (MS) algorithm that fills this gap in the multivariate case, allowing computation of recurrence matrices assuming moments are available. The algorithm is essentially explicit in two and three dimensions, but requires the numerical solution to a nonconvex problem in more than three dimensions. Compared to direct Gram–Schmidt-type orthogonalization, we demonstrate on several examples in up to three dimensions that the MS algorithm is far more stable, and allows accurate computation of orthogonal bases in the multivariate setting, in contrast to direct orthogonalization approaches. },
 additional_info={. *More Information* can be [found here](https://github.com/ZEXINLIU/Multi_ttr_examples)},
 selected={true},
-google_scholar_id={W7OEmFMy1HYC},
-preview={},
-html={},
-video={},
-pdf={}
+google_scholar_id={W7OEmFMy1HYC}
 }
 
 @article{Berggren2024,
 abbr={BMMB},
 bibtex_show={true},
 author={Berggren, Caleb C. and Jiang, David and Jack Wang, Y. F. and Bergquist, Jake A. and Rupp, Lindsay C. and Liu, Zexin and MacLeod, Rob and Narayan, Akil and Timmins, Lucas H.},
-title = {AInfluence of material parameter variability on the predicted coronary artery biomechanical environment via uncertainty quantification},
+title = {Influence of material parameter variability on the predicted coronary artery biomechanical environment via uncertainty quantification},
 journal = {Biomechanics and Modeling in Mechanobiology},
 volume = {23},
 number = {},
 pages = {927-940},
 year = {2024},
 doi = {10.1007/s10237-023-01814-2},
-url= {https://doi.org/10.1007/s10237-023-01814-2},
+url = {https://link.springer.com/article/10.1007/s10237-023-01814-2},
 publisher={Springer},
 abstract = { Central to the clinical adoption of patient-specific modeling strategies is demonstrating that simulation results are reliable and safe. Indeed, simulation frameworks must be robust to uncertainty in model input(s), and levels of confidence should accompany results. In this study, we applied a coupled uncertainty quantification–finite element (FE) framework to understand the impact of uncertainty in vascular material properties on variability in predicted stresses. Univariate probability distributions were fit to material parameters derived from layer-specific mechanical behavior testing of human coronary tissue. Parameters were assumed to be probabilistically independent, allowing for efficient parameter ensemble sampling. In an idealized coronary artery geometry, a forward FE model for each parameter ensemble was created to predict tissue stresses under physiologic loading. An emulator was constructed within the UncertainSCI software using polynomial chaos techniques, and statistics and sensitivities were directly computed. Results demonstrated that material parameter uncertainty propagates to variability in predicted stresses across the vessel wall, with the largest dispersions in stress within the adventitial layer. Variability in stress was most sensitive to uncertainties in the anisotropic component of the strain energy function. Moreover, unary and binary interactions within the adventitial layer were the main contributors to stress variance, and the leading factor in stress variability was uncertainty in the stress-like material parameter that describes the contribution of the embedded fibers to the overall artery stiffness. Results from a patient-specific coronary model confirmed many of these findings. Collectively, these data highlight the impact of material property variation on uncertainty in predicted artery stresses and present a pipeline to explore and characterize forward model uncertainty in computational biomechanics. },
 additional_info={},

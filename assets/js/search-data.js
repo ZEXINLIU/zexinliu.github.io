@@ -424,7 +424,10 @@ ninja.data = [{
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_2/";
-            },},{id: "news-congratulations-to-zexin-on-receiving-the-breakthrough-award-from-honor-for-the-groundbreaking-work-in-non-invasive-blood-pressure-prediction-sparkles",
+            },},{id: "news-thanks-to-dr-michael-kruse-from-lawrence-livermore-national-laboratory-for-recognizing-the-work-of-multivariate-stieltjies-algorithm-in-orthogonal-polynomial-sparkles",
+          title: 'Thanks to Dr. Michael Kruse from Lawrence Livermore National Laboratory for recognizing the...',
+          description: "",
+          section: "News",},{id: "news-congratulations-to-zexin-on-receiving-the-breakthrough-award-from-honor-for-the-groundbreaking-work-in-non-invasive-blood-pressure-prediction-sparkles",
           title: 'Congratulations to Zexin on receiving the Breakthrough Award from HONOR for the groundbreaking...',
           description: "",
           section: "News",},{id: "news-the-sudden-cardiac-arrest-screening-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-ultra",
@@ -491,6 +494,13 @@ ninja.data = [{
         section: 'Socials',
         handler: () => {
           window.open("mailto:%6C%69%75.%7A%65%78%69%6E%39%35%31%38@%67%6D%61%69%6C.%63%6F%6D", "_blank");
+        },
+      },{
+        id: 'social-github',
+        title: 'GitHub',
+        section: 'Socials',
+        handler: () => {
+          window.open("https://github.com/ZEXINLIU", "_blank");
         },
       },{
         id: 'social-instagram',

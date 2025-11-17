@@ -62,6 +62,11 @@
         {% assign author_is_self = false %}
         {%- assign author_last_name = author.last | regex_replace: '[*∗†‡§¶‖&^]', '' -%}
         {%- assign author_last_html = author.last | regex_replace: '([*∗†‡§¶‖&^]+)', '<sup>\1</sup>' -%}
+        {% comment %} new added {% endcomment %}
+        {% assign is_target_author = false %}
+        {% if author_last_name == "Liu" and author.first == "Zexin"}
+          {% assign is_target_author = true %}
+        {% endif %}
         {% if site.scholar.last_name contains author_last_name %}
           {% if site.scholar.first_name contains author.first %}
             {% assign author_is_self = true %}
@@ -89,6 +94,12 @@
             {{- author.first }}
             {{ author_last_html -}}
           </em>
+        {% comment %} new added {% endcomment %}
+        {%- elif is_target_author -%}
+          <strong>
+            {{- author.first }}
+            {{ author_last_html -}}
+          </strong>
         {%- else -%}
           {%- if coauthor_url -%}
             <a href="{{ coauthor_url }}">

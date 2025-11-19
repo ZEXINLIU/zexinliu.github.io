@@ -2,12 +2,12 @@
 layout: page
 title: submenus
 nav: true
-nav_order: 5
+nav_order: 6
 dropdown: true
 children:
   - title: bookshelf
     permalink: /books/
   - title: divider
-  - title: teaching
-    permalink: /teaching/
+  - title: news
+    permalink: /news/
 ---

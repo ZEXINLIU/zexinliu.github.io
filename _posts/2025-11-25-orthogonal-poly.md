@@ -1,11 +1,11 @@
 ---
 layout: post
 title: what are orthgonal polynomials and why they are important
-date: 2022-05-02 23:08:00
+date: 2025-10-01 00:00:00
 description: insights on orthogonal polynomials
-tags: orthogonal polynomials
+tags: formatting math
 categories: sample-posts
-related_posts: true
+featured: true
 ---
 
 The theory of orthogonal polynomials (OP) plays an important role in many branches of mathematics, such as approximation theory (best approximation, interpolation, quadrature), special functions, continued fractions, differential and integral equations.
@@ -46,6 +46,6 @@ then another set of nodes and weights will usually give more accurate quadrature
 \end{equation}
 The name "Legendre" and "Jacobi" are some classical orthogonal polynomials with various beautiful properties. Definitely there are more, e.g., Hermite, Chebyshev, Laguerre and e.t.c. Some may sound familiar since they are widely used in all walks of life.
 
-It remains to answer: how to compute the nodes and weights mentioned above? This is NOT a trivial question. One has to know about how orthogonal polynomials are defined such as Gram-Schmidt process applied to monomials, how to numerically compute finite moments with respect to fairly general measures, and how to devise (Stieltjes) algorithms to compute the known three-term recurrence formula from unidimensional case to higher dimensions with tensorial measures. More details can be found [here for univariate case](https://link.springer.com/article/10.1007/s10915-021-01586-w) and [here for multivariate case](https://epubs.siam.org/doi/abs/10.1137/22M1477131)if you are interested.
+It remains to answer: how to compute the nodes and weights mentioned above? This is NOT a trivial question. One has to know about how orthogonal polynomials are defined such as Gram-Schmidt process applied to monomials, how to numerically compute finite moments with respect to fairly general measures, and how to devise (Stieltjes) algorithms to compute the known three-term recurrence formula from unidimensional case to higher dimensions with tensorial measures. More details can be found [here for univariate case](https://link.springer.com/article/10.1007/s10915-021-01586-w) and [here for multivariate case](https://epubs.siam.org/doi/abs/10.1137/22M1477131) if you are interested.
 
 Integration is only a simple applications using OPs. Specifically, Many orthogonal polynomials are also used because they arise naturally in certain differential equations. E.g. Hermite polynomials in the quantum harmonic oscillator, In quantum mechanics, they describe the states of the quantum harmonic oscillator. Their eigenfunctions are used to represent wave functions in a box, leading to energy quantization; Legendre polynomials for Laplace’s equation, They are used extensively in solving Laplace's equation in spherical coordinates, which is critical in gravitational and electric field problems; Laguerre polynomials for the hydrogen atom, Essential in quantum mechanics, they describe the radial part of the wave function for hydrogen-like atoms. They arise in calculations pertaining to the potential energy and wave function behavior, and so on. Accurate evaluations of these polynomials or their variations are of great importance for scientific research in both theoretical analysis and applications.

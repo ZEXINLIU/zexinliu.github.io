@@ -325,6 +325,17 @@ ninja.data = [{
             window.location.href = "/blog/2022/giscus-comments/";
           
         },
+      },{id: "post-what-are-orthgonal-polynomials-and-why-they-are-important",
+        
+          title: "what are orthgonal polynomials and why they are important",
+        
+        description: "insights on orthogonal polynomials",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2022/orthogonal-poly/";
+          
+        },
       },{id: "post-a-post-with-redirect",
         
           title: "a post with redirect",

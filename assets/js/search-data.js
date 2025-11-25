@@ -72,7 +72,18 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/blog/";
               },
-            },{id: "post-a-post-with-plotly-js",
+            },{id: "post-what-are-orthgonal-polynomials-and-why-they-are-important",
+        
+          title: "what are orthgonal polynomials and why they are important",
+        
+        description: "insights on orthogonal polynomials",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2025/orthogonal-poly/";
+          
+        },
+      },{id: "post-a-post-with-plotly-js",
         
           title: "a post with plotly.js",
         
@@ -323,17 +334,6 @@ ninja.data = [{
         handler: () => {
           
             window.location.href = "/blog/2022/giscus-comments/";
-          
-        },
-      },{id: "post-what-are-orthgonal-polynomials-and-why-they-are-important",
-        
-          title: "what are orthgonal polynomials and why they are important",
-        
-        description: "insights on orthogonal polynomials",
-        section: "Posts",
-        handler: () => {
-          
-            window.location.href = "/blog/2022/orthogonal-poly/";
           
         },
       },{id: "post-a-post-with-redirect",

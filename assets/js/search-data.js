@@ -451,7 +451,26 @@ ninja.data = [{
             },},{id: "news-a-simple-inline-announcement-with-markdown-emoji-sparkles-smile",
           title: 'A simple inline announcement with Markdown emoji! :sparkles: :smile:',
           description: "",
-          section: "News",},{id: "projects-project-1",
+          section: "News",},{id: "news-thanks-to-dr-michael-kruse-from-lawrence-livermore-national-laboratory-for-recognizing-the-work-of-multivariate-stieltjies-algorithm-in-orthogonal-polynomial-sparkles",
+          title: 'Thanks to Dr. Michael Kruse from Lawrence Livermore National Laboratory for recognizing the...',
+          description: "",
+          section: "News",},{id: "news-congratulations-to-zexin-on-receiving-the-breakthrough-award-from-honor-for-the-groundbreaking-work-in-non-invasive-blood-pressure-prediction-sparkles",
+          title: 'Congratulations to Zexin on receiving the Breakthrough Award from HONOR for the groundbreaking...',
+          description: "",
+          section: "News",},{id: "news-the-sudden-cardiac-arrest-screening-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-ultra",
+          title: 'The sudden cardiac arrest screening feature I developed was introduced on newly released...',
+          description: "",
+          section: "News",handler: () => {
+              window.location.href = "/news/announcement_6/";
+            },},{id: "news-congratulations-to-zexin-for-receiving-the-beijing-high-level-overseas-talent-funding-program-sparkles",
+          title: 'Congratulations to Zexin for receiving the Beijing High-Level Overseas Talent Funding Program :sparkles:....',
+          description: "",
+          section: "News",},{id: "news-the-24-hour-continuous-non-invasive-blood-pressure-monitoring-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-pro",
+          title: 'The 24-hour continuous non-invasive blood pressure monitoring feature I developed was introduced on...',
+          description: "",
+          section: "News",handler: () => {
+              window.location.href = "/news/announcement_4/";
+            },},{id: "projects-project-1",
           title: 'project 1',
           description: "with background image",
           section: "Projects",handler: () => {

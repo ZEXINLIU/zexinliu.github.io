@@ -8,6 +8,11 @@ categories: sample-posts
 featured: true
 ---
 
+In this blog, we will talk about
+- how contrastive learning is applied to CV through representative works, e.g. MOCO
+- how to construct the objective, e.g. NCE loss, , what is the math behind it?
+- 
+
 What is contrastive learning? Contrastive Learning is a Machine Learning paradigm where unlabeled data points are juxtaposed against each other to teach a model which points are similar and which are different. That is, as the name suggests, samples are contrasted against each other, and those belonging to the same distribution, or have some latent features in common are pushed towards each other in the embedding space. In contrast, those belonging to different distributions or no attributes in common can be learned are pulled against each other.
 
 Vision AI is a good example to quickly illustrate how does Contrastive Learning work. Given a collection of animal pictures, one may not recognize some of the animals, but can infer which pictures show the same animals. Contrastive Learning mimics the way humans learn.
@@ -37,7 +42,7 @@ p(i|v) = \frac{\exp(v_i^T v / \tau)}{\sum_{i=1}^n \exp(v_j^T v / \tau)}, \quad p
 \end{equation}
 The objective is $$ J(\theta) = -\sum_{i=1}^n \log p(i|f_\theta(x_i)) = -\sum_{i=1}^n \log p(i|v_i) $$. Instead of exhaustively computing features for all images every time, we maintain a feature memory bank V for storing these representations. During each iteration, these representations as well as $\theta$ are optimized and then updated to memory bank at the corresponding instance entry. The only problem is the computational cost in the denominator in \eqref{eq:non-para}. Noise-Contrastive Estimation (NCE) is introduced to approximate this full softmax.
 
-The basic idea is to cast the multi-class classification problem into a set of binary classification problems, where the binary classification task is to discriminate between data samples and noise samples. We formalize noise distribution as a uniform: $$ p_n = \frac{1}{n} $$ (denoted by $$ D=0 $$), data distribution $$ p_d $$ (denoted by $$ D=1 $$). Thus we have the likelihood $$ p(i,v|D=0) = p_n, p(i,v|D=1) = p(i|v) $$.
+The basic idea is to cast the multi-class classification problem into a set of binary classification problems, where the binary classification task is to discriminate between data samples and noise samples. We formalize noise distribution as a uniform: $$ p_n = \frac{1}{n} $$ (denoted by $$ D=0 $$), data distribution $$ p_d $$ (denoted by $$ D=1 $$).
 
 Assume that noise samples are $$ m $$ times more frequent than data samples, e.g. number of data is $$ 1 $$ and noise samples is $$ m $$, i,e, $$ P(D=0) = \frac{m}{1+m} $$ and $$ P(D=1) = \frac{1}{1+m} $$. Then the posterior probability of sample $$ i $$ with feature $$ v $$ being from the data distribution is 
 \begin{equation}

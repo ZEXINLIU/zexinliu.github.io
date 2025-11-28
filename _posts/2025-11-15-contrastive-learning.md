@@ -9,9 +9,9 @@ featured: true
 ---
 
 In this blog, we will talk about
-- how contrastive learning is applied to CV through representative works, e.g. MOCO
-- how to construct the objective, e.g. NCE loss, , what is the math behind it?
-- 
+- how contrastive learning is applied to CV and extend to multimodal learning through representative works, e.g. InstDics, MOCO, SimSiam, CLIP, etc.
+- how to construct the objective, e.g. Triplet loss, (info) NCE loss, NT-Xent loss, Mutual Info loss, etc,  what is the math behind them?
+- how to apply contrastive learning in biomedical study?
 
 What is contrastive learning? Contrastive Learning is a Machine Learning paradigm where unlabeled data points are juxtaposed against each other to teach a model which points are similar and which are different. That is, as the name suggests, samples are contrasted against each other, and those belonging to the same distribution, or have some latent features in common are pushed towards each other in the embedding space. In contrast, those belonging to different distributions or no attributes in common can be learned are pulled against each other.
 
@@ -28,26 +28,22 @@ The following is a timeline of the development of Contrastive Learning in the fi
 - 2020, [SimCLR-V1](https://arxiv.org/pdf/2002.05709): Large Batchsize, MLP head, Multi-crop
 - 2020, [MOCO-V2](https://arxiv.org/pdf/2003.04297): MLP head, Multi-crop, Require NO Large Batchsize
 - 2020, [BYOL](https://arxiv.org/pdf/2006.07733): Require NO Negative Samples, Suffer data leak by BN (Controversial)
-- 2021, [Siam](https://arxiv.org/pdf/2011.10566): Siamese Network, Require NO Negative Samples nor Momentum Encoder
+- 2021, [SimSiam](https://arxiv.org/pdf/2011.10566): Siamese Network, Require NO Negative Samples nor Momentum Encoder
 - 2021, [MOCO-v3](https://arxiv.org/pdf/2104.02057): ViT Backbone, Instability alleviated by Frozen Patch Projection Layer
 - 2021, [DINO](https://arxiv.org/pdf/2104.14294): ViT Backbone, Momentum Encoder, Multi-crop, Self-distill
 - 2021, [CLIP](https://openai.com/index/clip/): Learns Visual Concepts from Natural Language Supervision
 
-We firstly talk about the paper `InstDics` since in my personal opinion, this work was a pioneer for Constrastive Learninig in CV, for firstly thinking about how to apply ideas of negative sampling and NCE loss in CV and how to design data structure for the convenience of sampling. These had a profound impact on subsequent works, such as SimCLR, MOCO, etc.
-
-The paper treats each image instance as a distinct class of its own and train a classifier to distinguish between individual instance classes. Under non-parametric softmax formulation, for image $$ x $$ with feature $$ v=f_\theta(x) $$, the probability of it being recognized as i-th example is
+We firstly talk about the paper `InstDics` since in my personal opinion, this work was a pioneer for Constrastive Learninig in CV, for firstly thinking about how to apply ideas of negative sampling and NCE loss in CV and how to design data structure for the convenience of sampling. These had a profound impact on subsequent works, such as SimCLR, MOCO, etc. The paper treats each image instance as a distinct class of its own and train a classifier to distinguish between individual instance classes. Under non-parametric softmax formulation, for image $$ x $$ with feature $$ v=f_\theta(x) $$, the probability of it being recognized as i-th example is
 \begin{equation}
 \label{eq:non-para}
-p(i|v) = \frac{\exp(v_i^T v / \tau)}{\sum_{i=1}^n \exp(v_j^T v / \tau)}, \quad p(i|v_i) = p(i|f_\theta(x_i))
+p(i|v) = \frac{\exp(v_i^T v / \tau)}{\sum_{i=1}^n \exp(v_j^T v / \tau)}, \quad p(i|v_i) = p(i|f_\theta(x_i)).
 \end{equation}
 The objective is $$ J(\theta) = -\sum_{i=1}^n \log p(i|f_\theta(x_i)) = -\sum_{i=1}^n \log p(i|v_i) $$. Instead of exhaustively computing features for all images every time, we maintain a feature memory bank V for storing these representations. During each iteration, these representations as well as $\theta$ are optimized and then updated to memory bank at the corresponding instance entry. The only problem is the computational cost in the denominator in \eqref{eq:non-para}. Noise-Contrastive Estimation (NCE) is introduced to approximate this full softmax.
 
-The basic idea is to cast the multi-class classification problem into a set of binary classification problems, where the binary classification task is to discriminate between data samples and noise samples. We formalize noise distribution as a uniform: $$ p_n = \frac{1}{n} $$ (denoted by $$ D=0 $$), data distribution $$ p_d $$ (denoted by $$ D=1 $$).
-
-Assume that noise samples are $$ m $$ times more frequent than data samples, e.g. number of data is $$ 1 $$ and noise samples is $$ m $$, i,e, $$ P(D=0) = \frac{m}{1+m} $$ and $$ P(D=1) = \frac{1}{1+m} $$. Then the posterior probability of sample $$ i $$ with feature $$ v $$ being from the data distribution is 
+The basic idea is to cast the multi-class classification problem into a set of binary classification problems, where the binary classification task is to discriminate between data samples and noise samples. We formalize noise distribution as a uniform: $$ p_n = \frac{1}{n} $$ (denoted by $$ D=0 $$), data distribution $$ p_d $$ (denoted by $$ D=1 $$). So given $$ v $$ sampled from certain distribution, the likelihood of being recognized as i-th example can be expressed as $$ p(i, v|D=1) = p(i|v) $$, $$ p(i, v|D=0) = p_n(i) $$. Assume that noise samples are $$ m $$ times more frequent than data samples, e.g. number of data is $$ 1 $$ and noise samples is $$ m $$, i,e, $$ P(D=0) = \frac{m}{1+m} $$ and $$ P(D=1) = \frac{1}{1+m} $$. Then the posterior probability of sample $$ i $$ with feature $$ v $$ being from the data distribution is 
 \begin{equation}
 \label{eq:posterior}
-p(D=1|i, v) = \frac{p(i,v|D=1) * p(D=1)}{p(i,v|D=1) p(D=1) + p(i,v|D=0) * p(D=0)} = \frac{p(i|v) * \frac{1}{1+m}}{p(i|v) * \frac{1}{1+m} + p_n(i) * \frac{m}{1+m}}
+p(D=1|i, v) = \frac{p(i,v|D=1) * p(D=1)}{p(i,v|D=1) p(D=1) + p(i,v|D=0) * p(D=0)} = \frac{p(i|v) * \frac{1}{1+m}}{p(i|v) * \frac{1}{1+m} + p_n(i) * \frac{m}{1+m}}.
 \end{equation}
 
 The training object (with negative log) is
@@ -55,6 +51,10 @@ The training object (with negative log) is
 \label{eq:obj}
 J_{NCE}(\theta) = -E_{p_d}[\log p(D=1|i, v)] - mE_{p_n} (\log(1 - p(D=1|i, v))).
 \end{equation}
-Apparently minimize the objective helps binary classification, but how related to original classification formulated by non-parametric softmax? To show this rigorously, we need to prove the equivalence of gradient of NCE and softmax.
+Apparently minimize the objective helps binary classification, but how related to original classification formulated by non-parametric softmax? To show this rigorously, we need to prove the equivalence of gradient of NCE and softmax:
 
-Then I want to talk about `MOCO` since the idea of Momentum Update and Queue dictionary for looking up are devised ingeniouly and enlighten many subsequent works.
+Then I want to talk about `MOCO` because the idea of Momentum Update and Queue dictionary for looking up are devised ingeniously and enlighten many subsequent works. We can think of contrastive loss methods as building dynamic dictionaries. The “keys” (tokens) in the dictionary are sampled from the data and are represented by an encoder network. Unsupervised learning trains encoders to perform dictionary look-up: an encoded “query” sample should be similar to its matching key and dissimilar to others. Learning is formulated as minimizing a contrastive loss. To achieve this, MOCO forms a queue of mini-batches that are encoded by the momentum encoder network. As a new mini-batch is selected, its encodings are enqueued, and the oldest encodings in the data structure are dequeued. This decouples the dictionary size, represented by the queue, from the batch size and enables a much larger dictionary to query from.
+
+Comparing to memory bank, the size of the queue does not vary with the size of dataset and the momentum update addresses the issue of inconsistent features generated from previous epochs stored in the bank. Besides, this dictionary look-up mechanism requires no large batch size as SimCLR does, which makes training with consumer-grade graphics cards available.
+
+Shuffle BN is worth a mention in MOCO because in original paper, it is devised to mitigate the situation that the model appears to “cheat” the pretext task and easily finds a low-loss solution. The authors believe that intra-batch communication among samples (caused by BN) leaks information and they address this issue by only doing shuffle BN for key encoder, not for query encode. This ensures the batch statistics used to compute a query and its positive key come from two different subsets. But the operation is not used any longer in subsequent work. The possible reason I guess is:

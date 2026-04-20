@@ -1,5 +1,5 @@
 metadata:
-  last_updated: '2026-03-30'
+  last_updated: '2026-04-20'
 papers:
   ViwJ6FoAAAAJ:2osOgNQ5qMEC:
     citations: 2
@@ -30,7 +30,7 @@ papers:
     title: Using UncertainSCI to Quantify Uncertainty in Cardiac Simulations
     year: '2020'
   ViwJ6FoAAAAJ:u5HHmVD_uO8C:
-    citations: 6
+    citations: 7
     title: On the computation of recurrence coefficients for univariate orthogonal polynomials
     year: '2021'
   ViwJ6FoAAAAJ:zYLM7Y9cAGgC:

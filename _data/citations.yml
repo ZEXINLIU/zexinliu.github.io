@@ -1,5 +1,5 @@
 metadata:
-  last_updated: '2026-04-20'
+  last_updated: '2026-05-04'
 papers:
   ViwJ6FoAAAAJ:2osOgNQ5qMEC:
     citations: 2
@@ -10,7 +10,7 @@ papers:
     title: Adaptive Surrogate Model for Failure Probability Estimation
     year: '2021'
   ViwJ6FoAAAAJ:UeHWp8X0CEIC:
-    citations: 35
+    citations: 36
     title: 'UncertainSCI: Uncertainty quantification for computational models in biomedicine and bioengineering'
     year: '2022'
   ViwJ6FoAAAAJ:W7OEmFMy1HYC:
@@ -18,7 +18,7 @@ papers:
     title: A Stieltjes algorithm for generating multivariate orthogonal polynomials
     year: '2023'
   ViwJ6FoAAAAJ:YsMSGLbcyi4C:
-    citations: 9
+    citations: 10
     title: Influence of material parameter variability on the predicted coronary artery biomechanical environment via uncertainty quantification
     year: '2024'
   ViwJ6FoAAAAJ:eQOLeE2rZwMC:

@@ -8,20 +8,21 @@ categories: sample-posts
 featured: true
 ---
 
-In this blog, we will talk about
-- how contrastive learning is applied to CV and extend to multimodal learning through representative works, e.g. InstDics, MOCO, SimSiam, CLIP, etc.
-- how to construct the objective, e.g. Triplet loss, (info) NCE loss, NT-Xent loss, Mutual Info loss, etc,  what is the math behind them?
+In this blog, we will focus on
+- how contrastive learning is applied to CV and extend to multimodal learning through representative works, e.g. InstDics,CPC, MOCO, SimSiam, CLIP, etc ?
+- how to achieve "contrastive learning" by defining losses, e.g. Triplet loss, Mutual Info (MINE), (info) NCE loss, NT-Xent loss, etc, what is the math behind them and how are they connected?
+- how to build the objective function based on these losses, and how to train the pipeline efficiently in practice?
 - how to apply contrastive learning in biomedical study?
 
 What is contrastive learning? Contrastive Learning is a Machine Learning paradigm where unlabeled data points are juxtaposed against each other to teach a model which points are similar and which are different. That is, as the name suggests, samples are contrasted against each other, and those belonging to the same distribution, or have some latent features in common are pushed towards each other in the embedding space. In contrast, those belonging to different distributions or no attributes in common can be learned are pulled against each other.
 
 Vision AI is a good example to quickly illustrate how does Contrastive Learning work. Given a collection of animal pictures, one may not recognize some of the animals, but can infer which pictures show the same animals. Contrastive Learning mimics the way humans learn.
 
-The basic contrastive learning framework consists of selecting a data sample, called “anchor,” a data point belonging to the same distribution as the anchor, called the “positive” sample, and another data point belonging to a different distribution called the “negative” sample. The SSL model tries to minimize the distance between the anchor and positive samples, i.e., the samples belonging to the same distribution, in the latent space, and at the same time maximize the distance between the anchor and the negative samples. This produces `Triplet loss`, which was concieved by Google researchers for their prominent [FaceNet](https://arxiv.org/abs/1503.03832) algorithm for face detection.
+The basic contrastive learning framework consists of selecting a data sample, called “anchor,” a data point belonging to the same distribution as the anchor, called the “positive” sample, and another data point belonging to a different distribution called the “negative” sample. The SSL model tries to minimize the distance between the anchor and positive samples, i.e., the samples belonging to the same distribution, in the latent space, and at the same time maximize the distance between the anchor and the negative samples. This produces Triplet loss, which was concieved by Google researchers for their prominent [FaceNet](https://arxiv.org/abs/1503.03832) algorithm for face detection.
 
 The following is a timeline of the development of Contrastive Learning in the field of Computer Vision.
 - 2018, [InstDics](https://arxiv.org/pdf/1805.01978): Non-Parametric Instance Discrimination, Memory Bank, NCE loss
-- 2018, [CPC](https://arxiv.org/pdf/1807.03748): Autoregressive Predictions Many Steps, Potential for Multiple Modulities
+- 2018, [CPC](https://arxiv.org/pdf/1807.03748): Info NCE loss, Autoregressive Predictions Many Steps, Potential for Multiple Modulities
 - 2018, [CMC](https://arxiv.org/pdf/1906.05849): Multiview, Maximize Mutual Information
 - 2019, [InvaSpread](https://arxiv.org/pdf/1904.03436): Augmentation, Siamese Network, Comparison within a Batch
 - 2019, [MOCO-V1](https://arxiv.org/pdf/1911.05722): Momentum Encoder, Dictionary Look-up (Queue)
@@ -51,7 +52,23 @@ The training object (with negative log) is
 \label{eq:obj}
 J_{NCE}(\theta) = -E_{p_d}[\log p(D=1|i, v)] - mE_{p_n} (\log(1 - p(D=1|i, v))).
 \end{equation}
-Apparently minimize the objective helps binary classification, but how related to original classification formulated by non-parametric softmax? To show this rigorously, we need to prove the equivalence of gradient of NCE and softmax:
+Apparently minimize the objective helps binary classification, but how related to original classification formulated by non-parametric softmax? To show this rigorously, we need to prove the equivalence of gradient of NCE and softmax: TODO
+
+Constrastive learning can be used in multimodal scenarios like text, speech, and RL in 3D environments besides images, proposed by Contrastive Predictive Coding (`CPC`). The key insight is to learn representations from high-dimensional data by predicting the future in latent space by using powerful autoregressive models like RNNs. Given the fact that high-level latent variables such as the label contain much less information than data, modeling $$ p(x|c) $$ may not be optimal for extracting shared information between data $$ x $$ and high-level context $$ c $$. This motivates the proposal of maximizing the mutual information defined by
+\begin{equation}
+\label{eq:mi}
+I(x, c) = \sum_{x, c} p(x, c) \log \frac{p(x|c)}{p(x)}.
+\end{equation}
+
+
+The motivation is that given $$ \mathcal{L}_N $$
+
+\begin{equation}
+\label{eq:infonce-mi}
+I(x_{x+k}, c_t) \ge \log(N) - \mathcal{L}_N
+\end{equation}
+observe that minimizing the InfoNCE loss $$ \mathcal{L}_N $$ maximizes a lower bound on mutual information.
+
 
 Then I want to talk about `MOCO` because the idea of Momentum Update and Queue dictionary for looking up are devised ingeniously and enlighten many subsequent works. We can think of contrastive loss methods as building dynamic dictionaries. The “keys” (tokens) in the dictionary are sampled from the data and are represented by an encoder network. Unsupervised learning trains encoders to perform dictionary look-up: an encoded “query” sample should be similar to its matching key and dissimilar to others. Learning is formulated as minimizing a contrastive loss. To achieve this, MOCO forms a queue of mini-batches that are encoded by the momentum encoder network. As a new mini-batch is selected, its encodings are enqueued, and the oldest encodings in the data structure are dequeued. This decouples the dictionary size, represented by the queue, from the batch size and enables a much larger dictionary to query from.
 

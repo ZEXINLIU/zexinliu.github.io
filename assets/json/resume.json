@@ -1,200 +1,185 @@
 {
   "basics": {
-    "name": "Albert Einstein",
-    "label": "Scientist",
+    "name": "Zexin Liu",
+    "label": "Advanced Algorithm Engineer",
     "image": "",
-    "email": "albert@einstein.de",
-    "phone": "(912) 123-4567",
-    "url": "https://alshedivat.github.io/al-folio/",
-    "summary": "A German-born theoretical physicist, widely ranked among the greatest and most influential scientists of all time",
-    "location": {
-      "address": "2712 Broadway St",
-      "postalCode": "CA 94115",
-      "city": "San Francisco",
-      "countryCode": "US",
-      "region": "California"
-    },
+    "email": "liu.zexin9518@gmail.com",
+    "phone": "",
+    "url": "https://zexinliu.github.io",
+    "summary": "Advanced algorithm engineer at HONOR working on wearable health algorithms, with a Ph.D. in Mathematics from the University of Utah. Research interests include scientific computing, uncertainty quantification, multimodal contrastive learning, flow matching generative modeling, physics-informed learning, and large medical models.",
+    "location": {},
     "profiles": [
       {
-        "network": "Twitter",
-        "username": "AlbertEinstein",
-        "url": "https://twitter.com/AlbertEinstein"
+        "network": "GitHub",
+        "username": "ZEXINLIU",
+        "url": "https://github.com/ZEXINLIU"
+      },
+      {
+        "network": "Google Scholar",
+        "username": "ViwJ6FoAAAAJ",
+        "url": "https://scholar.google.com/citations?user=ViwJ6FoAAAAJ"
       }
     ]
   },
   "work": [
     {
-      "name": "Institute for Advanced Study, Princeton University",
-      "position": "Professor of Theoretical Physics",
-      "url": "https://example.com",
-      "startDate": "1933-01-01",
-      "endDate": "1955-01-01",
-      "summary": "Teaching at Palmer Physical Laboratory (now 302 Frist Campus Center). While not a professor at Princeton, I associated with the physics professors and continued to give lectures on campus.",
-      "highlights": ["Relativity"]
-    }
-  ],
-  "volunteer": [
-    {
-      "organization": "People's Climate March",
-      "location": "Zurich, Switzerland",
-      "position": "Lead Organizer",
-      "url": "https://example.com",
-      "startDate": "2014-04-01",
-      "endDate": "2015-07-01",
-      "summary": "Lead organizer for the New York City branch of the People's Climate March, the largest climate march in history.",
-      "highlights": ["Awarded 'Climate Hero' award by Greenpeace for my efforts organizing the march.", "Men of the year 2014 by Time magazine"]
+      "name": "HONOR",
+      "position": "Advanced Algorithm Engineer",
+      "url": "https://www.honor.com/",
+      "summary": "Research and development of health-related algorithms for wearable devices.",
+      "highlights": [
+        "Led commercialization of sudden cardiac arrest screening based on deceleration capacity of rate for the HONOR Watch 5 Ultra.",
+        "Led commercialization of 24-hour continuous non-invasive blood pressure monitoring for the HONOR Watch 5 Pro.",
+        "Worked on physiological signal modeling, multimodal representation learning, calibration, domain adaptation, and health feature algorithm pipelines."
+      ]
     }
   ],
   "education": [
     {
-      "institution": "University of Zurich, Zurich, Switzerland",
-      "location": "Zurich, Switzerland",
-      "url": "https://www.uzh.ch/",
-      "area": "Software Development",
-      "studyType": "PhD",
-      "startDate": "1905-01-01",
-      "endDate": "1905-01-01",
-      "score": "10",
-      "courses": ["Theory of Relativity"]
+      "institution": "University of Utah",
+      "location": "Salt Lake City, Utah, United States",
+      "url": "https://www.utah.edu/",
+      "area": "Mathematics; scientific computing and uncertainty quantification",
+      "studyType": "Ph.D. in Mathematics",
+      "courses": [
+        "Advisor: Professor Akil Narayan",
+        "Three-term recurrence coefficients for univariate generalized orthogonal polynomials",
+        "Multivariate Stieltjes algorithms for orthogonal polynomials",
+        "Open-source uncertainty quantification tools for computational biomedical simulations"
+      ]
+    },
+    {
+      "institution": "Beihang University",
+      "location": "Beijing, China",
+      "url": "https://ev.buaa.edu.cn/",
+      "area": "Mathematics",
+      "studyType": "Bachelor's degree",
+      "courses": []
     }
   ],
   "awards": [
     {
-      "title": "Nobel Prize in Physics",
-      "date": "1921-11-01",
-      "awarder": "Royal Swedish Academy of Sciences",
-      "url": "https://www.nobelprize.org/prizes/physics/1921/einstein/biographical/",
-      "summary": "The Nobel Prizes are five separate prizes that, according to Alfred Nobel's will of 1895, are awarded to 'those who, during the preceding year, have conferred the greatest benefit to humankind.'"
-    }
-  ],
-  "certificates": [
-    {
-      "name": "Machine Learning",
-      "date": "2018-01-01",
-      "issuer": "Stanford University",
-      "url": "https://example.com",
-      "icon": "fa-solid fa-location-dot"
+      "title": "Beijing High-Level Overseas Talent Funding Program",
+      "date": "2025-08-01",
+      "awarder": "Beijing",
+      "url": "",
+      "summary": "Recognized by the Beijing High-Level Overseas Talent Funding Program."
     },
     {
-      "name": "Quantum Computing",
-      "date": "2018-01-01",
-      "issuer": "Stanford University",
-      "url": "https://example.com",
-      "icon": "fa-solid fa-tag"
-    },
-    {
-      "name": "Quantum Information",
-      "date": "2018-01-01",
-      "issuer": "Stanford University",
-      "url": "https://example.com",
-      "icon": "fa-solid fa-envelope"
-    },
-    {
-      "name": "Quantum Cryptography",
-      "date": "2018-01-01",
-      "issuer": "Stanford University",
-      "url": "https://example.com",
-      "icon": "fa-solid fa-hashtag"
-    },
-    {
-      "name": "Quantum Communication",
-      "date": "2018-01-01",
-      "issuer": "Stanford University",
-      "url": "https://example.com",
-      "icon": "fa-solid fa-calendar"
-    },
-    {
-      "name": "Quantum Teleportation",
-      "date": "2018-01-01",
-      "issuer": "Stanford University",
-      "url": "https://example.com",
-      "icon": "fa-solid fa-clipboard-check"
+      "title": "HONOR Breakthrough Award",
+      "date": "2025-01-08",
+      "awarder": "HONOR",
+      "url": "",
+      "summary": "Awarded for work in non-invasive blood pressure prediction."
     }
   ],
   "publications": [
     {
-      "name": "Zur Elektrody/namik bewegter Körper",
-      "publisher": "Annalen der Physik",
-      "releaseDate": "1905-06-30",
-      "url": "https://en.wikisource.org/wiki/Translation:On_the_Electrodynamics_of_Moving_Bodies",
-      "summary": "It concerned an interpretation of the Michelson–Morley experiment and the properties of light and time. Special relativity incorporates the principle that the speed of light is the same for all inertial observers regardless of the state of motion of the source."
+      "name": "Influence of material parameter variability on the predicted coronary artery biomechanical environment via uncertainty quantification",
+      "publisher": "Biomechanics and Modeling in Mechanobiology",
+      "releaseDate": "2024-01-01",
+      "url": "https://link.springer.com/article/10.1007/s10237-023-01814-2",
+      "summary": "Applied uncertainty quantification to study how vascular material parameter variability propagates to predicted coronary artery biomechanics."
     },
     {
-      "name": "Über einen die Erzeugung und Verwandlung des Lichtes betreffenden heuristischen Gesichtspunkt",
-      "publisher": "Annalen der Physik",
-      "releaseDate": "1905-03-18",
-      "url": "https://de.wikisource.org/wiki/Über_einen_die_Erzeugung_und_Verwandlung_des_Lichtes_betreffenden_heuristischen_Gesichtspunkt",
-      "summary": "In the second paper, he applied the quantum theory to light to explain the photoelectric effect. In particular, he used the idea of light quanta (photons) to explain experimental results, but stressed the importance of the experimental results. The importance of his work on the photoelectric effect earned him the Nobel Prize in Physics in 1921."
+      "name": "A Stieltjes Algorithm for Generating Multivariate Orthogonal Polynomials",
+      "publisher": "SIAM Journal on Scientific Computing",
+      "releaseDate": "2023-01-01",
+      "url": "https://epubs.siam.org/doi/abs/10.1137/22M1477131",
+      "summary": "Introduced a Multivariate Stieltjes algorithm for computing recurrence matrices and stable multivariate orthogonal polynomial bases."
     },
     {
-      "name": "Die Grundlage der allgemeinen Relativitätstheorie",
-      "publisher": "Annalen der Physik",
-      "releaseDate": "1916-03-20",
-      "url": "https://de.wikisource.org/wiki/Die_Grundlage_der_allgemeinen_Relativitätstheorie",
-      "summary": "The publication of the theory of general relativity made him internationally famous. He was professor of physics at the universities of Zurich (1909–1911) and Prague (1911–1912), before he returned to ETH Zurich (1912–1914)."
+      "name": "UncertainSCI: A Python Package for Noninvasive Parametric Uncertainty Quantification of Simulation Pipelines",
+      "publisher": "The Journal of Open Source Software",
+      "releaseDate": "2023-01-01",
+      "url": "https://joss.theoj.org/papers/10.21105/joss.04249",
+      "summary": "Described the UncertainSCI Python package for noninvasive parametric uncertainty quantification of simulation pipelines."
+    },
+    {
+      "name": "UncertainSCI: Uncertainty quantification for computational models in biomedicine and bioengineering",
+      "publisher": "Computers in Biology and Medicine",
+      "releaseDate": "2023-01-01",
+      "url": "https://www.sciencedirect.com/science/article/pii/S0010482522011155",
+      "summary": "Presented UncertainSCI as a lightweight tool for polynomial-chaos-based uncertainty quantification in biomedical and bioengineering simulations."
+    },
+    {
+      "name": "On the Computation of Recurrence Coefficients for Univariate Orthogonal Polynomials",
+      "publisher": "Journal of Scientific Computing",
+      "releaseDate": "2021-01-01",
+      "url": "https://link.springer.com/article/10.1007/s10915-021-01586-w",
+      "summary": "Developed and evaluated algorithms for computing recurrence coefficients for univariate orthogonal polynomial families."
     }
   ],
   "skills": [
     {
-      "name": "Physics",
-      "level": "Master",
+      "name": "Scientific Computing and Uncertainty Quantification",
+      "level": "Advanced",
       "icon": "fa-solid fa-hashtag",
-      "keywords": [
-        "Quantum Mechanics",
-        "Quantum Computing",
-        "Quantum Information",
-        "Quantum Cryptography",
-        "Quantum Communication",
-        "Quantum Teleportation"
-      ]
+      "keywords": ["Orthogonal polynomials", "Polynomial chaos", "Gaussian quadrature", "Biomedical simulations", "UncertainSCI"]
+    },
+    {
+      "name": "Wearable Health Algorithms",
+      "level": "Advanced",
+      "icon": "fa-solid fa-heart-pulse",
+      "keywords": ["Physiological signals", "Photoplethysmography", "Electrocardiogram", "Blood pressure prediction", "Deceleration capacity"]
+    },
+    {
+      "name": "Machine Learning",
+      "level": "Advanced",
+      "icon": "fa-solid fa-brain",
+      "keywords": ["Contrastive learning", "Flow matching", "Diffusion models", "RAG", "Fine-tuning", "Domain adaptation"]
+    },
+    {
+      "name": "AI Systems",
+      "level": "Working knowledge",
+      "icon": "fa-solid fa-server",
+      "keywords": ["Distributed training", "Large language model inference", "Paged KV cache", "Tensor parallelism", "vLLM"]
     }
   ],
   "languages": [
     {
-      "language": "German",
+      "language": "Chinese",
       "fluency": "Native speaker",
       "icon": ""
     },
     {
       "language": "English",
-      "fluency": "Fluent",
+      "fluency": "Professional working proficiency",
       "icon": ""
     }
   ],
   "interests": [
     {
-      "name": "Physics",
+      "name": "Research and Engineering Interests",
       "icon": "fa-solid fa-tag",
       "keywords": [
-        "Quantum Mechanics",
-        "Quantum Computing",
-        "Quantum Information",
-        "Quantum Cryptography",
-        "Quantum Communication",
-        "Quantum Teleportation"
+        "Scientific computing",
+        "Uncertainty quantification",
+        "Wearable health",
+        "Generative modeling",
+        "Multimodal learning",
+        "AI infrastructure"
       ]
-    }
-  ],
-  "references": [
-    {
-      "name": "Professor John Doe",
-      "icon": "fa-solid fa-laptop",
-      "reference": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam condimentum, diam quis convallis euismod, arcu mi ullamcorper lorem, a vestibulum nunc magna at sem. Sed in risus ac felis varius blandit. D"
-    },
-    {
-      "name": "Professor John Doe",
-      "icon": "fa-solid fa-thumbtack",
-      "reference": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam condimentum, diam quis convallis euismod, arcu mi ullamcorper lorem, a vestibulum nunc magna at sem. Sed in risus ac felis varius blandit. D"
     }
   ],
   "projects": [
     {
-      "name": "Quantum Computing",
-      "summary": "Quantum computing is the use of quantum-mechanical phenomena such as superposition and entanglement to perform computation. Computers that perform quantum computations are known as quantum computers.",
-      "highlights": ["Quantum Teleportation", "Quantum Cryptography"],
-      "startDate": "2018-01-01",
-      "endDate": "2018-01-01",
-      "url": "https://example.com"
+      "name": "UncertainSCI",
+      "summary": "Open-source Python toolkit for noninvasive parametric uncertainty quantification of computational simulation pipelines.",
+      "highlights": ["Polynomial chaos emulators", "Near-optimal sampling", "Biomedical simulation applications"],
+      "url": "https://github.com/SCIInstitute/UncertainSCI"
+    },
+    {
+      "name": "Orthogonal Polynomial Recurrence Algorithms",
+      "summary": "Algorithms and examples for univariate and multivariate recurrence coefficients used in orthogonal polynomial computation.",
+      "highlights": ["Univariate recurrence coefficients", "Multivariate Stieltjes algorithm", "Stable polynomial bases"],
+      "url": "https://github.com/ZEXINLIU/Multi_ttr_examples"
+    },
+    {
+      "name": "Wearable Health Algorithm Commercialization",
+      "summary": "Lead development work for wearable health features including sudden cardiac arrest screening and continuous non-invasive blood pressure monitoring.",
+      "highlights": ["HONOR Watch 5 Ultra", "HONOR Watch 5 Pro", "Physiological signal modeling"],
+      "url": "https://www.honor.com/"
     }
   ]
 }

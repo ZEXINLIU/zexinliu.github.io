@@ -4,17 +4,17 @@
 
 title: blank # the website title (if blank, full name will be used instead)
 first_name: Zexin
-middle_name: 
+middle_name:
 last_name: Liu
 contact_note: >
   Emailing is preferred to reach me.
 description: > # the ">" symbol means to ignore newlines until "footer_text:"
-  A simple, whitespace theme for academics. Based on [*folio](https://github.com/bogoli/-folio) design.
+  Personal website of Zexin Liu, covering scientific computing, uncertainty quantification, wearable health algorithms, generative modeling, and AI systems notes.
 footer_text: >
   Powered by <a href="https://jekyllrb.com/" target="_blank">Jekyll</a> with <a href="https://github.com/alshedivat/al-folio">al-folio</a> theme.
   Hosted by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>.
   Photos from <a href="https://unsplash.com" target="_blank">Unsplash</a>.
-keywords: jekyll, jekyll-theme, academic-website, portfolio-website # add your own keywords or leave empty
+keywords: zexin liu, scientific computing, uncertainty quantification, wearable health, generative modeling, ai infra
 lang: en # the language of your site (for example: en, fr, cn, ru, etc.)
 icon: ⚛️ # the emoji used as the favicon (alternatively, provide image name in /assets/img/)
 
@@ -86,8 +86,8 @@ bing_site_verification: # out your bing-site-verification ID (Bing Webmaster)
 # Blog
 # -----------------------------------------------------------------------------
 
-blog_name: al-folio # blog_name will be displayed in your blog page
-blog_description: a simple whitespace theme for academics
+blog_name: notes # blog_name will be displayed in your blog page
+blog_description: research and engineering notes on scientific computing, AI systems, and generative modeling
 permalink: /blog/:year/:title/
 lsi: false # produce an index for related posts
 
@@ -258,8 +258,8 @@ jekyll-archives:
   books:
     enabled: [year, tags, categories] # enables year, tag and category archives (remove if you need to disable one of them).
 
-display_tags: ["formatting", "images", "links", "math", "code", "blockquotes"] # these tags will be displayed on the front page of your blog
-display_categories: ["external-services"] # these categories will be displayed on the front page of your blog
+display_tags: ["generative-models", "large-language-models", "ai-infra", "scientific-computing", "contrastive-learning", "diffusion"] # these tags will be displayed on the front page of your blog
+display_categories: ["ai-notes", "ai-infra", "research-notes"] # these categories will be displayed on the front page of your blog
 
 # -----------------------------------------------------------------------------
 # Jekyll Scholar

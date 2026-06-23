@@ -1,11 +1,8 @@
 ---
 layout: page
-title: project 7
-description: with background image
-img: assets/img/4.jpg
-importance: 1
-category: work
-related_publications: true
+title: project template 7
+description: unpublished project template retained for reference
+published: false
 ---
 
 Every project has a beautiful feature showcase page.

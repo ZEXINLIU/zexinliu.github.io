@@ -25,14 +25,14 @@ ninja.data = [{
           },
         },{id: "nav-projects",
           title: "projects",
-          description: "A growing collection of your cool projects.",
+          description: "Research, engineering, and technical-writing projects.",
           section: "Navigation",
           handler: () => {
             window.location.href = "/projects/";
           },
         },{id: "nav-cv",
           title: "cv",
-          description: "This is a description of the page. You can modify it in &#39;_pages/cv.md&#39;. You can also change or remove the top pdf download button.",
+          description: "A concise CV focused on research, wearable health algorithms, publications, and engineering projects.",
           section: "Navigation",
           handler: () => {
             window.location.href = "/cv/";
@@ -51,22 +51,77 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/books/";
               },
-            },{id: "post-what-are-orthgonal-polynomials-and-why-they-are-important",
+            },{id: "post-nano-vllm-pipeline-tutorial-从-prompt-到-output-的推理闭环",
         
-          title: "what are orthgonal polynomials and why they are important",
+          title: "nano-vllm Pipeline Tutorial：从 Prompt 到 Output 的推理闭环",
         
-        description: "insights on orthogonal polynomials",
+        description: "沿请求生命周期拆解 scheduler、paged KV cache、prefill/decode、prefix cache 和采样。",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/nano-vllm-pipeline-tutorial/";
+          
+        },
+      },{id: "post-分布式训练教程-从通信原语到大模型并行训练",
+        
+          title: "分布式训练教程：从通信原语到大模型并行训练",
+        
+        description: "从 collective 通信、DDP/FSDP/ZeRO 到 TP/PP/SP/EP 的大模型训练并行笔记。",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/distributed-learning-tutorial/";
+          
+        },
+      },{id: "post-attention-原理-实现与演进教程",
+        
+          title: "Attention 原理、实现与演进教程",
+        
+        description: "从 MHA/MQA/GQA、RoPE、MLA 到 FlashAttention、MoE 的注意力机制笔记。",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/attention-tutorial/";
+          
+        },
+      },{id: "post-基于流的生成模型-从-normalizing-flow-到-stochastic-interpolants-与-meanflow",
+        
+          title: "基于流的生成模型：从 Normalizing Flow 到 Stochastic Interpolants 与 MeanFlow",
+        
+        description: "从 Normalizing Flow、Flow Matching 到 Rectified Flow、MeanFlow 的生成模型主线。",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/flow-based-generative-models/";
+          
+        },
+      },{id: "post-score-based-diffusion-models",
+        
+          title: "Score-Based Diffusion Models",
+        
+        description: "从 score matching、DDPM 到 SDE/ODE 采样的扩散模型笔记。",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2025/score-based-diffusion-models/";
+          
+        },
+      },{id: "post-what-are-orthogonal-polynomials-and-why-are-they-important",
+        
+          title: "What are orthogonal polynomials and why are they important?",
+        
+        description: "A short intuition-first note on Gaussian quadrature, recurrence coefficients, and why orthogonal polynomials matter.",
         section: "Posts",
         handler: () => {
           
             window.location.href = "/blog/2025/orthogonal-poly/";
           
         },
-      },{id: "post-constrastive-learning-a-powerful-technique-for-self-supervised-learning",
+      },{id: "post-对比学习-从样本构造到表征学习",
         
-          title: "constrastive learning, a powerful technique for self-supervised learning",
+          title: "对比学习：从样本构造到表征学习",
         
-        description: "insights on constrastive learning",
+        description: "从 Triplet、InfoNCE、NT-Xent 到 MoCo、SimCLR、DINO、CLIP 的统一视角。",
         section: "Posts",
         handler: () => {
           
@@ -458,64 +513,49 @@ ninja.data = [{
           section: "News",},{id: "news-congratulations-to-zexin-on-receiving-the-breakthrough-award-from-honor-for-the-groundbreaking-work-in-non-invasive-blood-pressure-prediction-sparkles",
           title: 'Congratulations to Zexin on receiving the Breakthrough Award from HONOR for the groundbreaking...',
           description: "",
-          section: "News",},{id: "news-the-sudden-cardiac-arrest-screening-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-ultra",
-          title: 'The sudden cardiac arrest screening feature I developed was introduced on newly released...',
+          section: "News",},{id: "news-the-sudden-cardiac-arrest-screening-feature-i-developed-was-introduced-on-the-newly-released-honor-watch-5-ultra",
+          title: 'The sudden cardiac arrest screening feature I developed was introduced on the newly...',
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_6/";
             },},{id: "news-congratulations-to-zexin-for-receiving-the-beijing-high-level-overseas-talent-funding-program-sparkles",
           title: 'Congratulations to Zexin for receiving the Beijing High-Level Overseas Talent Funding Program :sparkles:....',
           description: "",
-          section: "News",},{id: "news-the-24-hour-continuous-non-invasive-blood-pressure-monitoring-feature-i-developed-was-introduced-on-newly-released-honor-watch-5-pro",
+          section: "News",},{id: "news-the-24-hour-continuous-non-invasive-blood-pressure-monitoring-feature-i-developed-was-introduced-on-the-newly-released-honor-watch-5-pro",
           title: 'The 24-hour continuous non-invasive blood pressure monitoring feature I developed was introduced on...',
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_4/";
-            },},{id: "projects-project-1",
-          title: 'project 1',
-          description: "with background image",
+            },},{id: "projects-wearable-health-algorithms-at-honor",
+          title: 'Wearable Health Algorithms at HONOR',
+          description: "Health-related algorithm pipelines for commercial wearable devices.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/1_project/";
-            },},{id: "projects-project-2",
-          title: 'project 2',
-          description: "a project with a background image and giscus comments",
+            },},{id: "projects-continuous-non-invasive-blood-pressure-monitoring",
+          title: 'Continuous Non-Invasive Blood Pressure Monitoring',
+          description: "Lead development of 24-hour continuous BP monitoring on HONOR Watch 5 Pro.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/2_project/";
-            },},{id: "projects-project-3-with-very-long-name",
-          title: 'project 3 with very long name',
-          description: "a project that redirects to another website",
+            },},{id: "projects-sudden-cardiac-arrest-screening",
+          title: 'Sudden Cardiac Arrest Screening',
+          description: "Lead development of deceleration-capacity-based screening on HONOR Watch 5 Ultra.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/3_project/";
-            },},{id: "projects-project-4",
-          title: 'project 4',
-          description: "another without an image",
+            },},{id: "projects-uncertainsci",
+          title: 'UncertainSCI',
+          description: "Open-source uncertainty quantification toolkit for computational simulation pipelines.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/4_project/";
-            },},{id: "projects-project-5",
-          title: 'project 5',
-          description: "a project with a background image",
+            },},{id: "projects-orthogonal-polynomial-recurrence-algorithms",
+          title: 'Orthogonal Polynomial Recurrence Algorithms',
+          description: "Algorithms for univariate and multivariate orthogonal polynomial recurrence coefficients.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/5_project/";
-            },},{id: "projects-project-6",
-          title: 'project 6',
-          description: "a project with no image",
+            },},{id: "projects-ai-systems-and-generative-modeling-notes",
+          title: 'AI Systems and Generative Modeling Notes',
+          description: "Technical notes on attention, inference, distributed training, diffusion, flow matching, and contrastive learning.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/6_project/";
-            },},{id: "projects-project-7",
-          title: 'project 7',
-          description: "with background image",
-          section: "Projects",handler: () => {
-              window.location.href = "/projects/7_project/";
-            },},{id: "projects-project-8",
-          title: 'project 8',
-          description: "an other project with a background image and giscus comments",
-          section: "Projects",handler: () => {
-              window.location.href = "/projects/8_project/";
-            },},{id: "projects-project-9",
-          title: 'project 9',
-          description: "another project with an image 🎉",
-          section: "Projects",handler: () => {
-              window.location.href = "/projects/9_project/";
             },},{
         id: 'social-email',
         title: 'email',
@@ -536,13 +576,6 @@ ninja.data = [{
         section: 'Socials',
         handler: () => {
           window.open("https://instagram.com/zealous_xray", "_blank");
-        },
-      },{
-        id: 'social-linkedin',
-        title: 'LinkedIn',
-        section: 'Socials',
-        handler: () => {
-          window.open("https://www.linkedin.com/in/Zexin Liu", "_blank");
         },
       },{
         id: 'social-scholar',

@@ -2,10 +2,10 @@
 layout: page
 title: projects
 permalink: /projects/
-description: Research, engineering, and technical-writing projects.
+description: Three core projects connecting mathematical modeling, medical AI, and product deployment.
 nav: true
 nav_order: 3
-display_categories: [work, research, notes]
+display_categories: [health-ai, research]
 horizontal: false
 ---
 

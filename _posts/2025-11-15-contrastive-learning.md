@@ -1,6 +1,6 @@
 ---
 layout: post
-title: 对比学习：从样本构造到表征学习
+title: "Contrastive Learning: From Sampling Strategies to Multimodal Representation Learning"
 date: 2025-11-15 00:00:00
 description: 从 Triplet、InfoNCE、NT-Xent 到 MoCo、SimCLR、DINO、CLIP 的统一视角。
 tags: contrastive-learning representation-learning multimodal-learning machine-learning

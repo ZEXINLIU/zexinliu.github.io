@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Score-Based Diffusion Models
+title: "Score-Based Diffusion Models: From Denoising Score Matching to SDE/ODE Samplers"
 date: 2025-12-08 00:00:00
 description: 从 score matching、DDPM 到 SDE/ODE 采样的扩散模型笔记。
 tags: diffusion score-matching generative-models stochastic-processes

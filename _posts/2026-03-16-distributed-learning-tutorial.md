@@ -1,6 +1,6 @@
 ---
 layout: post
-title: 分布式训练教程：从通信原语到大模型并行训练
+title: "Distributed Training for Large Models: Collectives, ZeRO/FSDP, Tensor Parallelism, and Pipeline Parallelism"
 date: 2026-03-16 00:00:00
 description: 从 collective 通信、DDP/FSDP/ZeRO 到 TP/PP/SP/EP 的大模型训练并行笔记。
 tags: distributed-training large-language-models ai-infra deep-learning-systems

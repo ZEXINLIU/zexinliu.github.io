@@ -1,6 +1,6 @@
 ---
 layout: post
-title: 基于流的生成模型：从 Normalizing Flow 到 Stochastic Interpolants 与 MeanFlow
+title: "Flow-Based Generative Models: Normalizing Flow, Flow Matching, Rectified Flow, and MeanFlow"
 date: 2026-01-18 00:00:00
 description: 从 Normalizing Flow、Flow Matching 到 Rectified Flow、MeanFlow 的生成模型主线。
 tags: flow-matching normalizing-flows generative-models diffusion

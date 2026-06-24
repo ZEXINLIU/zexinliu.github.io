@@ -1,19 +1,22 @@
 ---
 layout: page
-title: Continuous Non-Invasive Blood Pressure Monitoring
-description: Lead development of 24-hour continuous BP monitoring on HONOR Watch 5 Pro.
+title: Heart-Rate Deceleration Capacity Screening
+description: Wearable heart-risk screening built on deceleration capacity, ECG/PPG representation learning, and health-study deployment.
 img:
 importance: 2
-category: work
+category: health-ai
 ---
 
-I led the algorithm development for the 24-hour continuous non-invasive blood pressure monitoring feature introduced on the HONOR Watch 5 Pro.
+I led development of the sudden cardiac arrest screening feature based on heart-rate deceleration capacity (DC), introduced on the HONOR Watch 5 Ultra. The feature is part of HONOR's health-study platform and uses heart-rate deceleration related signals to support heart-health risk screening research.
 
-The feature supports wearable blood pressure trend tracking and measurement workflows based on physiological signals, calibration against upper-arm blood pressure monitor labels, and robustness work across user groups.
+Deceleration capacity is connected to autonomic regulation, especially the vagus nerve's ability to slow heart rate. In practice, the challenge is to bridge classical HRV/DC theory with large-scale wearable sensing: consumer devices collect long, noisy, behavior-dependent signals rather than controlled clinical recordings.
 
-Algorithmic themes involved in the pipeline include:
+Core algorithmic themes:
 
-- BP regression from wearable physiological signals.
-- Calibration and feature alignment across population groups.
-- Conditional generative modeling around PPG regions of interest.
-- Domain adaptation for real-world deployment.
+- **Classical cardiac signal theory.** Use deceleration capacity, rhythm variability, and related time-series descriptors as physiologically meaningful anchors.
+- **ECG/PPG representation learning.** Learn robust embeddings over physiological waveforms so the system can capture morphology and temporal context beyond hand-crafted features.
+- **Contrastive and predictive learning.** Use multimodal and temporal contrastive objectives to align ECG/PPG segments, separate signal artifacts from physiological variation, and improve label efficiency.
+- **Risk-oriented modeling.** Emphasize stable ranking, interpretable signal quality control, and clinically meaningful trend behavior rather than only point-estimate accuracy.
+- **Deployment under real-world variability.** Handle wearing state, motion, sensor noise, long-horizon monitoring, and health-study data pipelines.
+
+This project connects my interest in contrastive representation learning with medical-domain algorithm delivery: the model must learn useful structure from noisy longitudinal data, while the feature still needs to respect physiology and product constraints.

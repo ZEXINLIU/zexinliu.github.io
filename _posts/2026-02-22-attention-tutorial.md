@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Attention 原理、实现与演进教程
+title: "Modern Attention for LLMs: MHA/MQA/GQA, RoPE, MLA, FlashAttention, and MoE"
 date: 2026-02-22 00:00:00
 description: 从 MHA/MQA/GQA、RoPE、MLA 到 FlashAttention、MoE 的注意力机制笔记。
 tags: attention transformer large-language-models inference
@@ -14,7 +14,7 @@ categories: ai-infra
 1. **MHA、MQA、GQA 的核心差异不是 attention 公式变了，而是 K/V head 的组织方式变了。** MHA 给每个 query head 配独立 K/V；MQA 让所有 query head 共享一组 K/V；GQA 介于两者之间。真正的收益主要出现在自回归解码：KV cache 更小，显存带宽压力更低。本文会把 `num_q_heads`、`num_kv_heads`、`repeat_kv`、cache shape 和复杂度放在同一个接口里解释。
 2. **Transformer encoder-decoder 与 GPT decoder-only 的差异，最后会落到 attention 调用接口上。** Encoder self-attention、decoder causal self-attention、cross-attention 都可以复用同一个注意力核心，但 Q/K/V 来源、mask、KV cache 生命周期完全不同。本文会解释为什么 cross-attention 是 `Q=decoder, K/V=encoder`，而 decoder-only decode 阶段只输入一个新 token 却能看见全部历史。
 3. **位置编码的难点不只是公式，而是“位置如何进入 QK 点积”。** 原始正弦位置编码把位置加到输入 embedding；RoPE 把 Q/K 当作二维旋转对；ALiBi 直接修改 attention logits。尤其 RoPE，本文会保留原始代码中有价值的多实现视角：偶奇维公式、向量化 rotate、复数乘法、split-half/nanovllm 风格布局。它们解释的是同一个数学对象，但暴露了不同的工程布局问题。
-4. **MLA 的关键不是一句“压缩 KV cache”，而是两次矩阵吸收如何成立，以及为什么 RoPE 路径不能一起吸收。** 内容路径可以利用结合律把 $(c^QW^{UQ})(c^{KV}W^{UK})^\top$ 改写成 $c^Q[W^{UQ}(W^{UK})^\top](c^{KV})^\top$；输出路径也可以把 $W^{UV}$ 和 $W^O$ 合并。但 RoPE key 是位置相关路径，旋转矩阵随位置变化，不能简单并进同一个 latent KV。
+4. **MLA 的关键不是一句“压缩 KV cache”，而是两次矩阵吸收如何成立，以及为什么 RoPE 路径不能一起吸收。** 内容路径可以利用结合律把 $$(c^QW^{UQ})(c^{KV}W^{UK})^\top$$ 改写成 $$c^Q\left(W^{UQ}(W^{UK})^\top\right)(c^{KV})^\top$$；输出路径也可以把 $W^{UV}$ 和 $W^O$ 合并。但 RoPE key 是位置相关路径，旋转矩阵随位置变化，不能简单并进同一个 latent KV。
 5. **FlashAttention 不是把 $O(T^2)$ attention 变成线性 attention，而是在 exact attention 下减少中间矩阵和 HBM/SRAM 往返。** 它的灵魂是 online softmax：只维护每行的最大值 $m$、归一化分母 $l$ 和输出累积量 $O$，就能 block by block 合并完整 softmax。本文会解释 v1/v2 在循环顺序和输出写回上的差异，也会说明 CPU-only 环境能复现什么、不能复现什么。
 6. **长上下文、Sparse Attention、Linear Attention 不是同一类优化。** 长上下文 RoPE 扩展主要改位置到角度的映射；Sparse Attention 改 token 可见图；Linear Attention 改 softmax kernel 或计算结合方式。它们都服务长序列，但牺牲点完全不同。
 7. **MoE 与 Attention 的关系经常被混在一起，但它通常不是 attention 机制本身。** MoE 多数时候替换 FFN 层，用路由器让不同 token 走不同专家；MLA/FlashAttention 处理 attention/cache/IO，MoE 处理参数容量和条件计算。现代模型可以同时使用这些机制。
@@ -139,7 +139,7 @@ v_for_attn = repeat_kv(v, num_q_heads // num_kv_heads)
 
 MQA 最省 cache，但所有 query heads 只能共享同一套 K/V 表示；MHA 最自由，但 cache 最大。GQA 的价值是：让若干 query heads 共享一个 K/V head，保留一部分多样性，同时显著降低 cache。例如 `num_q_heads=32, num_kv_heads=8` 时，KV cache 是 MHA 的 1/4，但不是像 MQA 那样压到 1/32。
 
-对应实验：[examples/attention_family.py](/Users/liuzexin/demo/attentions/examples/attention_family.py)。
+对应实验：`examples/attention_family.py`。
 
 ## 3. Transformer Encoder-Decoder 与 Decoder-Only
 
@@ -180,7 +180,7 @@ decode step t:
 
 这里 causal mask 的 diagonal 也要考虑 `past_len`。如果当前只输入 1 个 token，source length 是 `past_len + 1`，它可以看见所有历史和自己，不应该被普通上三角 mask 错误屏蔽。
 
-对应实验：[examples/transformer_usage.py](/Users/liuzexin/demo/attentions/examples/transformer_usage.py)。
+对应实验：`examples/transformer_usage.py`。
 
 ## 4. 位置编码
 
@@ -247,7 +247,8 @@ split-half 需要先整理成：
 [x0, x2, ..., x1, x3, ...]
 ```
 
-然后再用 `rotate_half`。这正是 [examples/positional_encoding.py](/Users/liuzexin/demo/attentions/examples/positional_encoding.py) 里保留多实现对照的原因。
+然后再用 `rotate_half`。这正是 `examples/positional_encoding.py`
+里保留多实现对照的原因。
 
 ### 4.4 ALiBi 的位置观
 
@@ -259,7 +260,7 @@ $$
 
 它的优势是外推直觉简单：训练短上下文时，模型已经学到“越远惩罚越大”的结构；推理长上下文时继续沿用。代价是表达形式更受约束，不像 RoPE 那样在 Q/K 子空间里保留更丰富的相对相位关系。
 
-对应实验：[examples/positional_encoding.py](/Users/liuzexin/demo/attentions/examples/positional_encoding.py)。
+对应实验：`examples/positional_encoding.py`。
 
 ### 4.5 长上下文位置扩展：外推不是免费午餐
 
@@ -274,7 +275,9 @@ RoPE 的优势是相对位置性质强，但长上下文会遇到一个直观问
 
 这几类方法都在改 RoPE 的位置映射，而不是改 attention 的 Q/K/V head 组织，也不是 FlashAttention 那种 IO 优化。它们通常可以和 GQA、MLA、FlashAttention 同时出现。
 
-对应实验：[examples/long_context_position.py](/Users/liuzexin/demo/attentions/examples/long_context_position.py)。它展示了原始 RoPE、Position Interpolation、YaRN-like 频率缩放在相同位置上的角度变化。这个实验不是复现完整论文训练 recipe，而是把“为什么长上下文要改角度映射”这件事跑出来。
+对应实验：`examples/long_context_position.py`。它展示了原始 RoPE、Position
+Interpolation、YaRN-like 频率缩放在相同位置上的角度变化。这个实验不是复现完整论文训练
+recipe，而是把“为什么长上下文要改角度映射”这件事跑出来。
 
 ## 5. MLA：从 KV cache 压缩到矩阵吸收
 
@@ -392,7 +395,7 @@ $$
 
 因此 MLA 可以吸收内容部分的 $W^{UQ},W^{UK},W^{UV},W^O$，但仍需要单独处理 RoPE key。这个点如果不拆开，很容易误以为“既然 K/V 都压缩了，RoPE K 也能一起压缩到同一个 latent 里”。
 
-对应实验：[examples/mla.py](/Users/liuzexin/demo/attentions/examples/mla.py)。它提供 expanded forward 和 absorbed forward，并做数值等价检查。
+对应实验：`examples/mla.py`。它提供 expanded forward 和 absorbed forward，并做数值等价检查。
 
 ## 6. FlashAttention：exact attention 的 IO 优化
 
@@ -458,7 +461,8 @@ FlashAttention-2 不只是换了 for 循环，它还减少 non-matmul FLOPs、�
 - v1 更像“每来一个 K/V block，都把某个 Q block 的归一化输出更新并写回”。
 - v2 更像“固定一个 Q block，把所有 K/V block 扫完，最后只除一次 $l$ 并写回一次 $O$”。
 
-本项目的 [examples/flash_attention.py](/Users/liuzexin/demo/attentions/examples/flash_attention.py) 保留了这种差异，并打印 `output block writes`。在 `seq_len=64, block=16` 的例子里，v1 写 16 次，v2 写 4 次。
+本项目的 `examples/flash_attention.py` 保留了这种差异，并打印
+`output block writes`。在 `seq_len=64, block=16` 的例子里，v1 写 16 次，v2 写 4 次。
 
 ### 6.4 CPU-only 环境应该展示什么
 
@@ -537,7 +541,9 @@ $$
 
 Performer 用 FAVOR+ 随机特征近似 softmax attention；Linear Transformer 使用 kernel trick 让 attention 可以像 RNN 一样递推。代价是：这不再是普通 dense softmax attention 的精确结果，质量、稳定性和长距离选择能力都取决于核函数和特征设计。
 
-对应实验：[examples/sparse_linear_attention.py](/Users/liuzexin/demo/attentions/examples/sparse_linear_attention.py)。它展示 sliding-window sparse attention 的可见边数量变化，以及一个确定性 feature map 的 causal linear attention。实验中 sparse/linear 输出和 dense 输出有差异，这是预期现象，因为机制被改变了。
+对应实验：`examples/sparse_linear_attention.py`。它展示 sliding-window sparse attention
+的可见边数量变化，以及一个确定性 feature map 的 causal linear attention。实验中
+sparse/linear 输出和 dense 输出有差异，这是预期现象，因为机制被改变了。
 
 ## 8. MoE 与 Attention 的关系
 
@@ -582,7 +588,9 @@ MoE 的工程难点包括：
 - 分布式通信：专家并行会引入 all-to-all 通信，吞吐瓶颈可能不在矩阵乘法本身。
 - 专家分工：共享专家、细粒度专家、路由正则都会影响专家是否真正专业化。
 
-对应实验：[examples/moe_attention.py](/Users/liuzexin/demo/attentions/examples/moe_attention.py)。它保留 dense causal attention，然后把 FFN 换成 top-1 MoE，并打印每个专家收到的 token 数量。这个实验的重点是看清楚：attention 负责跨 token 混合，MoE 负责每个 token 后续走哪个 FFN 专家。
+对应实验：`examples/moe_attention.py`。它保留 dense causal attention，然后把 FFN 换成
+top-1 MoE，并打印每个专家收到的 token 数量。这个实验的重点是看清楚：attention 负责跨
+token 混合，MoE 负责每个 token 后续走哪个 FFN 专家。
 
 ### 8.1 Top-k 路由的不可导问题
 
@@ -739,7 +747,10 @@ $$
 
 这和 MoE top-k routing 的共同点是：前向有离散选择，训练需要替代梯度路径。不同点是：VQ-VAE 的离散对象是 latent code，MoE 的离散对象是专家路由。
 
-对应实验：[examples/discrete_gradient_estimators.py](/Users/liuzexin/demo/attentions/examples/discrete_gradient_estimators.py)。它展示 `logsumexp≈max`、softargmax、recursive soft top-k、soft F1 surrogate、hard argmax 无梯度，softmax relaxation、Gumbel-Softmax hard sample、straight-through argmax 都能让 router logits 获得梯度，并用 VQ-VAE codebook lookup 展示 encoder/codebook 的梯度路径。
+对应实验：`examples/discrete_gradient_estimators.py`。它展示
+`logsumexp≈max`、softargmax、recursive soft top-k、soft F1 surrogate、hard argmax
+无梯度，softmax relaxation、Gumbel-Softmax hard sample、straight-through argmax 都能让
+router logits 获得梯度，并用 VQ-VAE codebook lookup 展示 encoder/codebook 的梯度路径。
 
 ## 9. 面试复写线索
 
@@ -772,17 +783,17 @@ $$
 
 ## 11. 当前项目代码组织
 
-本教程对应的代码都在 [examples/](/Users/liuzexin/demo/attentions/examples)：
+本教程对应的本地实验代码包括：
 
-- [attention_family.py](/Users/liuzexin/demo/attentions/examples/attention_family.py)：MHA/MQA/GQA 统一实现。
-- [transformer_usage.py](/Users/liuzexin/demo/attentions/examples/transformer_usage.py)：encoder-decoder、decoder-only、KV cache 调用方式。
-- [positional_encoding.py](/Users/liuzexin/demo/attentions/examples/positional_encoding.py)：sinusoidal、RoPE 多实现、ALiBi。
-- [long_context_position.py](/Users/liuzexin/demo/attentions/examples/long_context_position.py)：RoPE 长上下文位置缩放实验。
-- [mla.py](/Users/liuzexin/demo/attentions/examples/mla.py)：MLA 展开版与矩阵吸收版。
-- [flash_attention.py](/Users/liuzexin/demo/attentions/examples/flash_attention.py)：FlashAttention v1/v2 CPU 仿真。
-- [sparse_linear_attention.py](/Users/liuzexin/demo/attentions/examples/sparse_linear_attention.py)：Sparse/Linear Attention 机制对照。
-- [moe_attention.py](/Users/liuzexin/demo/attentions/examples/moe_attention.py)：Attention 后接 MoE-FFN 的路由实验。
-- [discrete_gradient_estimators.py](/Users/liuzexin/demo/attentions/examples/discrete_gradient_estimators.py)：MoE/VQ-VAE 中离散选择的替代梯度路径。
+- `attention_family.py`：MHA/MQA/GQA 统一实现。
+- `transformer_usage.py`：encoder-decoder、decoder-only、KV cache 调用方式。
+- `positional_encoding.py`：sinusoidal、RoPE 多实现、ALiBi。
+- `long_context_position.py`：RoPE 长上下文位置缩放实验。
+- `mla.py`：MLA 展开版与矩阵吸收版。
+- `flash_attention.py`：FlashAttention v1/v2 CPU 仿真。
+- `sparse_linear_attention.py`：Sparse/Linear Attention 机制对照。
+- `moe_attention.py`：Attention 后接 MoE-FFN 的路由实验。
+- `discrete_gradient_estimators.py`：MoE/VQ-VAE 中离散选择的替代梯度路径。
 
 ## 12. 理解检查
 

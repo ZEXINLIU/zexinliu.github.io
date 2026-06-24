@@ -3,6 +3,8 @@
   contents:
     - name: Full Name
       value: Zexin Liu
+    - name: Positioning
+      value: Medical AI and wearable health algorithm researcher with a Ph.D. in Mathematics.
     - name: Email
       value: liu.zexin9518@gmail.com
     - name: Website
@@ -18,7 +20,8 @@
       description:
         - Advisor: Professor Akil Narayan
         - Scientific computing and uncertainty quantification
-        - Orthogonal polynomial recurrence algorithms
+        - Orthogonal polynomial recurrence algorithms for nonclassical measures
+        - Polynomial chaos expansion for biomedical simulation uncertainty quantification
     - title: Bachelor's degree in Mathematics
       institution: Beihang University
 
@@ -28,19 +31,34 @@
     - title: Advanced Algorithm Engineer
       institution: HONOR
       description:
-        - Health-related algorithms for wearable devices
-        - Lead developer for sudden cardiac arrest screening on HONOR Watch 5 Ultra
+        - Medical and health-related algorithms for wearable devices
         - Lead developer for 24-hour continuous non-invasive blood pressure monitoring on HONOR Watch 5 Pro
+        - Lead developer for sudden cardiac arrest screening based on heart-rate deceleration capacity on HONOR Watch 5 Ultra
+        - Physiological signal modeling, multimodal representation learning, calibration, domain adaptation, and medical large-model exploration
 
-- title: Open Source Projects
+- title: Core Projects
   type: time_table
   contents:
-    - title: <a href="https://github.com/SCIInstitute/UncertainSCI">UncertainSCI</a>
-      description: Python toolkit for noninvasive parametric uncertainty quantification of simulation pipelines.
-    - title: <a href="https://github.com/ZEXINLIU/Uni_ttr_examples">Univariate recurrence examples</a>
-      description: Examples for computing recurrence coefficients for univariate orthogonal polynomials.
-    - title: <a href="https://github.com/ZEXINLIU/Multi_ttr_examples">Multivariate recurrence examples</a>
-      description: Examples for multivariate Stieltjes algorithms and orthogonal polynomial bases.
+    - title: Continuous Non-Invasive Blood Pressure Monitoring
+      description: Wearable BP monitoring from physiological signals, calibration-aware regression, domain adaptation, and product-level robustness.
+    - title: Heart-Rate Deceleration Capacity Screening
+      description: Wearable heart-risk screening using deceleration capacity theory, ECG/PPG representation learning, and contrastive predictive learning.
+    - title: Orthogonal Polynomials and Biomedical Uncertainty Quantification
+      description: Ph.D. research on recurrence algorithms, polynomial chaos expansion, UncertainSCI, and reliable biomedical simulations.
+
+- title: Selected Publications
+  type: time_table
+  contents:
+    - title: <a href="https://doi.org/10.22489/CinC.2020.275">Using UncertainSCI to Quantify Uncertainty in Cardiac Simulations</a>
+      description: Computing in Cardiology, 2020.
+    - title: <a href="https://doi.org/10.1007/s10915-021-01586-w">On the Computation of Recurrence Coefficients for Univariate Orthogonal Polynomials</a>
+      description: Journal of Scientific Computing, 2021.
+    - title: <a href="https://doi.org/10.1016/j.compbiomed.2022.106407">UncertainSCI for computational models in biomedicine and bioengineering</a>
+      description: Computers in Biology and Medicine, 2023.
+    - title: <a href="https://doi.org/10.21105/joss.04249">UncertainSCI Python package</a>
+      description: Journal of Open Source Software, 2023.
+    - title: <a href="https://doi.org/10.1137/22M1477131">A Stieltjes Algorithm for Generating Multivariate Orthogonal Polynomials</a>
+      description: SIAM Journal on Scientific Computing, 2023.
 
 - title: Honors and Awards
   type: time_table
@@ -53,18 +71,20 @@
 - title: Research and Engineering Interests
   type: nested_list
   contents:
-    - title: Scientific computing and uncertainty quantification
+    - title: Mathematical modeling and uncertainty quantification
       items:
         - Orthogonal polynomials
-        - Polynomial chaos
-        - Biomedical simulations
-    - title: Wearable health algorithms
+        - Polynomial chaos expansion
+        - Biomedical simulation reliability
+    - title: Medical AI and wearable health algorithms
       items:
         - Physiological signal modeling
         - Blood pressure prediction
-        - Deceleration capacity and heart health screening
-    - title: Machine learning and AI systems
+        - Deceleration capacity and heart-risk screening
+        - Calibration and domain adaptation
+    - title: Large models and generative AI for healthcare
       items:
+        - Medical-domain RAG and fine-tuning
         - Flow matching and diffusion models
         - Multimodal contrastive learning
-        - Large language model inference and distributed training
+        - Large-model inference systems

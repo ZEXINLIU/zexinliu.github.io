@@ -5,7 +5,7 @@ title: cv
 nav: true
 nav_order: 4
 cv_pdf: # you can also use external links here
-description: A concise CV focused on research, wearable health algorithms, publications, and engineering projects.
+description: Mathematical modeling, medical AI, wearable health algorithms, selected publications, and deployed product work.
 toc:
   sidebar: left
 ---

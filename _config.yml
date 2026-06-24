@@ -9,12 +9,12 @@ last_name: Liu
 contact_note: >
   Emailing is preferred to reach me.
 description: > # the ">" symbol means to ignore newlines until "footer_text:"
-  Personal website of Zexin Liu, covering scientific computing, uncertainty quantification, wearable health algorithms, generative modeling, and AI systems notes.
+  Personal website of Zexin Liu, covering mathematical modeling, uncertainty quantification, medical AI, wearable health algorithms, generative modeling, and large-model systems.
 footer_text: >
   Powered by <a href="https://jekyllrb.com/" target="_blank">Jekyll</a> with <a href="https://github.com/alshedivat/al-folio">al-folio</a> theme.
   Hosted by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>.
   Photos from <a href="https://unsplash.com" target="_blank">Unsplash</a>.
-keywords: zexin liu, scientific computing, uncertainty quantification, wearable health, generative modeling, ai infra
+keywords: zexin liu, medical ai, wearable health algorithms, scientific computing, uncertainty quantification, generative modeling, large language models, ai infra
 lang: en # the language of your site (for example: en, fr, cn, ru, etc.)
 icon: ⚛️ # the emoji used as the favicon (alternatively, provide image name in /assets/img/)
 
@@ -87,7 +87,7 @@ bing_site_verification: # out your bing-site-verification ID (Bing Webmaster)
 # -----------------------------------------------------------------------------
 
 blog_name: notes # blog_name will be displayed in your blog page
-blog_description: research and engineering notes on scientific computing, AI systems, and generative modeling
+blog_description: research and engineering notes on medical AI, scientific computing, generative modeling, and large-model systems
 permalink: /blog/:year/:title/
 lsi: false # produce an index for related posts
 

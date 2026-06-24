@@ -25,14 +25,14 @@ ninja.data = [{
           },
         },{id: "nav-projects",
           title: "projects",
-          description: "Research, engineering, and technical-writing projects.",
+          description: "Three core projects connecting mathematical modeling, medical AI, and product deployment.",
           section: "Navigation",
           handler: () => {
             window.location.href = "/projects/";
           },
         },{id: "nav-cv",
           title: "cv",
-          description: "A concise CV focused on research, wearable health algorithms, publications, and engineering projects.",
+          description: "Mathematical modeling, medical AI, wearable health algorithms, selected publications, and deployed product work.",
           section: "Navigation",
           handler: () => {
             window.location.href = "/cv/";
@@ -51,9 +51,9 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/books/";
               },
-            },{id: "post-nano-vllm-pipeline-tutorial-从-prompt-到-output-的推理闭环",
+            },{id: "post-inside-nano-vllm-scheduler-paged-kv-cache-prefill-decode-and-sampling",
         
-          title: "nano-vllm Pipeline Tutorial：从 Prompt 到 Output 的推理闭环",
+          title: "Inside nano-vLLM: Scheduler, Paged KV Cache, Prefill/Decode, and Sampling",
         
         description: "沿请求生命周期拆解 scheduler、paged KV cache、prefill/decode、prefix cache 和采样。",
         section: "Posts",
@@ -62,9 +62,9 @@ ninja.data = [{
             window.location.href = "/blog/2026/nano-vllm-pipeline-tutorial/";
           
         },
-      },{id: "post-分布式训练教程-从通信原语到大模型并行训练",
+      },{id: "post-distributed-training-for-large-models-collectives-zero-fsdp-tensor-parallelism-and-pipeline-parallelism",
         
-          title: "分布式训练教程：从通信原语到大模型并行训练",
+          title: "Distributed Training for Large Models: Collectives, ZeRO/FSDP, Tensor Parallelism, and Pipeline Parallelism",
         
         description: "从 collective 通信、DDP/FSDP/ZeRO 到 TP/PP/SP/EP 的大模型训练并行笔记。",
         section: "Posts",
@@ -73,9 +73,9 @@ ninja.data = [{
             window.location.href = "/blog/2026/distributed-learning-tutorial/";
           
         },
-      },{id: "post-attention-原理-实现与演进教程",
+      },{id: "post-modern-attention-for-llms-mha-mqa-gqa-rope-mla-flashattention-and-moe",
         
-          title: "Attention 原理、实现与演进教程",
+          title: "Modern Attention for LLMs: MHA/MQA/GQA, RoPE, MLA, FlashAttention, and MoE",
         
         description: "从 MHA/MQA/GQA、RoPE、MLA 到 FlashAttention、MoE 的注意力机制笔记。",
         section: "Posts",
@@ -84,9 +84,9 @@ ninja.data = [{
             window.location.href = "/blog/2026/attention-tutorial/";
           
         },
-      },{id: "post-基于流的生成模型-从-normalizing-flow-到-stochastic-interpolants-与-meanflow",
+      },{id: "post-flow-based-generative-models-normalizing-flow-flow-matching-rectified-flow-and-meanflow",
         
-          title: "基于流的生成模型：从 Normalizing Flow 到 Stochastic Interpolants 与 MeanFlow",
+          title: "Flow-Based Generative Models: Normalizing Flow, Flow Matching, Rectified Flow, and MeanFlow",
         
         description: "从 Normalizing Flow、Flow Matching 到 Rectified Flow、MeanFlow 的生成模型主线。",
         section: "Posts",
@@ -95,9 +95,9 @@ ninja.data = [{
             window.location.href = "/blog/2026/flow-based-generative-models/";
           
         },
-      },{id: "post-score-based-diffusion-models",
+      },{id: "post-score-based-diffusion-models-from-denoising-score-matching-to-sde-ode-samplers",
         
-          title: "Score-Based Diffusion Models",
+          title: "Score-Based Diffusion Models: From Denoising Score Matching to SDE/ODE Samplers",
         
         description: "从 score matching、DDPM 到 SDE/ODE 采样的扩散模型笔记。",
         section: "Posts",
@@ -106,20 +106,20 @@ ninja.data = [{
             window.location.href = "/blog/2025/score-based-diffusion-models/";
           
         },
-      },{id: "post-what-are-orthogonal-polynomials-and-why-are-they-important",
+      },{id: "post-orthogonal-polynomials-for-uncertainty-quantification-recurrence-algorithms-pce-and-biomedical-simulation",
         
-          title: "What are orthogonal polynomials and why are they important?",
+          title: "Orthogonal Polynomials for Uncertainty Quantification: Recurrence Algorithms, PCE, and Biomedical Simulation",
         
-        description: "A short intuition-first note on Gaussian quadrature, recurrence coefficients, and why orthogonal polynomials matter.",
+        description: "A research-level map of orthogonal polynomial recurrence algorithms, polynomial chaos expansion, and noninvasive uncertainty quantification for biomedical simulations.",
         section: "Posts",
         handler: () => {
           
             window.location.href = "/blog/2025/orthogonal-poly/";
           
         },
-      },{id: "post-对比学习-从样本构造到表征学习",
+      },{id: "post-contrastive-learning-from-sampling-strategies-to-multimodal-representation-learning",
         
-          title: "对比学习：从样本构造到表征学习",
+          title: "Contrastive Learning: From Sampling Strategies to Multimodal Representation Learning",
         
         description: "从 Triplet、InfoNCE、NT-Xent 到 MoCo、SimCLR、DINO、CLIP 的统一视角。",
         section: "Posts",
@@ -526,36 +526,21 @@ ninja.data = [{
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_4/";
-            },},{id: "projects-wearable-health-algorithms-at-honor",
-          title: 'Wearable Health Algorithms at HONOR',
-          description: "Health-related algorithm pipelines for commercial wearable devices.",
-          section: "Projects",handler: () => {
-              window.location.href = "/projects/1_project/";
             },},{id: "projects-continuous-non-invasive-blood-pressure-monitoring",
           title: 'Continuous Non-Invasive Blood Pressure Monitoring',
-          description: "Lead development of 24-hour continuous BP monitoring on HONOR Watch 5 Pro.",
+          description: "24-hour wearable BP monitoring from physiological signals, calibration, and population-level robustness.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/1_project/";
+            },},{id: "projects-heart-rate-deceleration-capacity-screening",
+          title: 'Heart-Rate Deceleration Capacity Screening',
+          description: "Wearable heart-risk screening built on deceleration capacity, ECG/PPG representation learning, and health-study deployment.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/2_project/";
-            },},{id: "projects-sudden-cardiac-arrest-screening",
-          title: 'Sudden Cardiac Arrest Screening',
-          description: "Lead development of deceleration-capacity-based screening on HONOR Watch 5 Ultra.",
+            },},{id: "projects-orthogonal-polynomials-and-biomedical-uncertainty-quantification",
+          title: 'Orthogonal Polynomials and Biomedical Uncertainty Quantification',
+          description: "Ph.D. research on recurrence algorithms, polynomial chaos expansion, UncertainSCI, and reliable biomedical simulation.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/3_project/";
-            },},{id: "projects-uncertainsci",
-          title: 'UncertainSCI',
-          description: "Open-source uncertainty quantification toolkit for computational simulation pipelines.",
-          section: "Projects",handler: () => {
-              window.location.href = "/projects/4_project/";
-            },},{id: "projects-orthogonal-polynomial-recurrence-algorithms",
-          title: 'Orthogonal Polynomial Recurrence Algorithms',
-          description: "Algorithms for univariate and multivariate orthogonal polynomial recurrence coefficients.",
-          section: "Projects",handler: () => {
-              window.location.href = "/projects/5_project/";
-            },},{id: "projects-ai-systems-and-generative-modeling-notes",
-          title: 'AI Systems and Generative Modeling Notes',
-          description: "Technical notes on attention, inference, distributed training, diffusion, flow matching, and contrastive learning.",
-          section: "Projects",handler: () => {
-              window.location.href = "/projects/6_project/";
             },},{
         id: 'social-email',
         title: 'email',

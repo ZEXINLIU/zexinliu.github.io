@@ -9,12 +9,12 @@ last_name: Liu
 contact_note: >
   Emailing is preferred to reach me.
 description: > # the ">" symbol means to ignore newlines until "footer_text:"
-  Personal website of Zexin Liu, covering mathematical modeling, uncertainty quantification, medical AI, wearable health algorithms, generative modeling, and large-model systems.
+  Personal website of Zexin Liu, covering mathematical modeling, uncertainty quantification, medical AI, wearable health algorithms, safe reinforcement learning, generative personalization, contrastive learning, and large-model systems.
 footer_text: >
   Powered by <a href="https://jekyllrb.com/" target="_blank">Jekyll</a> with <a href="https://github.com/alshedivat/al-folio">al-folio</a> theme.
   Hosted by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>.
   Photos from <a href="https://unsplash.com" target="_blank">Unsplash</a>.
-keywords: zexin liu, medical ai, wearable health algorithms, scientific computing, uncertainty quantification, generative modeling, large language models, ai infra
+keywords: zexin liu, medical ai, wearable health algorithms, scientific computing, uncertainty quantification, safe reinforcement learning, generative personalization, contrastive learning, large language models, ai infra
 lang: en # the language of your site (for example: en, fr, cn, ru, etc.)
 icon: ⚛️ # the emoji used as the favicon (alternatively, provide image name in /assets/img/)
 
@@ -87,7 +87,7 @@ bing_site_verification: # out your bing-site-verification ID (Bing Webmaster)
 # -----------------------------------------------------------------------------
 
 blog_name: notes # blog_name will be displayed in your blog page
-blog_description: research and engineering notes on medical AI, scientific computing, generative modeling, and large-model systems
+blog_description: research and engineering notes on medical AI, scientific computing, safe RL, generative modeling, contrastive learning, and large-model systems
 permalink: /blog/:year/:title/
 lsi: false # produce an index for related posts
 
@@ -258,7 +258,7 @@ jekyll-archives:
   books:
     enabled: [year, tags, categories] # enables year, tag and category archives (remove if you need to disable one of them).
 
-display_tags: ["generative-models", "large-language-models", "ai-infra", "scientific-computing", "contrastive-learning", "diffusion"] # these tags will be displayed on the front page of your blog
+display_tags: ["reinforcement-learning", "generative-models", "contrastive-learning", "large-language-models", "ai-infra", "scientific-computing"] # these tags will be displayed on the front page of your blog
 display_categories: ["ai-notes", "ai-infra", "research-notes"] # these categories will be displayed on the front page of your blog
 
 # -----------------------------------------------------------------------------

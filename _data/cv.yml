@@ -4,7 +4,7 @@
     - name: Full Name
       value: Zexin Liu
     - name: Positioning
-      value: Medical AI and wearable health algorithm researcher with a Ph.D. in Mathematics.
+      value: Medical AI and wearable health algorithm researcher with a strong mathematical background in scientific computing, uncertainty quantification, safe RL, generative personalization, and contrastive physiological modeling.
     - name: Email
       value: liu.zexin9518@gmail.com
     - name: Website
@@ -34,15 +34,18 @@
         - Medical and health-related algorithms for wearable devices
         - Lead developer for 24-hour continuous non-invasive blood pressure monitoring on HONOR Watch 5 Pro
         - Lead developer for sudden cardiac arrest screening based on heart-rate deceleration capacity on HONOR Watch 5 Ultra
-        - Physiological signal modeling, multimodal representation learning, calibration, domain adaptation, and medical large-model exploration
+        - Physiological signal modeling, multimodal representation learning, calibration, domain adaptation, and product-level health-feature deployment
+        - Applied project tracks in safe reinforcement learning, conditional generative personalization, ECG/PPG contrastive learning, and uncertainty-aware biomedical simulation
 
 - title: Core Projects
   type: time_table
   contents:
-    - title: Continuous Non-Invasive Blood Pressure Monitoring
-      description: Wearable BP monitoring from physiological signals, calibration-aware regression, domain adaptation, and product-level robustness.
-    - title: Heart-Rate Deceleration Capacity Screening
-      description: Wearable heart-risk screening using deceleration capacity theory, ECG/PPG representation learning, and contrastive predictive learning.
+    - title: SafeRunRL
+      description: Simulation-based safe reinforcement learning prototype for adaptive treadmill control from wearable PPG/ACC-derived physiological states, with constrained MDP formulation, personalized cardiovascular simulation, and action shielding.
+    - title: 24H Cuffless Blood Pressure Monitoring
+      description: Wearable PPG blood pressure monitoring project with personalization, calibration, generative modeling, and product-level robustness.
+    - title: Deceleration Capacity Screening from Wearable Signals
+      description: Wearable heart-risk screening project using deceleration capacity theory, ECG/PPG representation learning, signal-quality awareness, and long-horizon physiological aggregation.
     - title: Orthogonal Polynomials and Biomedical Uncertainty Quantification
       description: Ph.D. research on recurrence algorithms, polynomial chaos expansion, UncertainSCI, and reliable biomedical simulations.
 
@@ -82,9 +85,11 @@
         - Blood pressure prediction
         - Deceleration capacity and heart-risk screening
         - Calibration and domain adaptation
+        - Safe physiological control
     - title: Large models and generative AI for healthcare
       items:
-        - Medical-domain model adaptation and fine-tuning
+        - Safe reinforcement learning
+        - Conditional generative personalization
         - Flow matching and diffusion models
         - Multimodal contrastive learning
         - Large-model inference systems

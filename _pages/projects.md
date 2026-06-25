@@ -2,10 +2,10 @@
 layout: page
 title: projects
 permalink: /projects/
-description: Three core projects connecting mathematical modeling, medical AI, and product deployment.
+description: Four projects connecting safe reinforcement learning, generative personalization, contrastive physiological modeling, scientific computing, and biomedical uncertainty quantification.
 nav: true
 nav_order: 3
-display_categories: [health-ai, research]
+display_categories: [health-ai, reinforcement-learning, research]
 horizontal: false
 ---
 

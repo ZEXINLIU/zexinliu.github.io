@@ -1,22 +1,21 @@
 ---
 layout: page
-title: Heart-Rate Deceleration Capacity Screening
-description: Wearable heart-risk screening built on deceleration capacity, ECG/PPG representation learning, and health-study deployment.
+title: "Deceleration Capacity Screening from Wearable Signals"
+description: Wearable heart-risk screening using deceleration capacity theory, ECG/PPG representation learning, and long-horizon aggregation.
 img:
 importance: 2
 category: health-ai
 ---
 
-I led development of the sudden cardiac arrest screening feature based on heart-rate deceleration capacity (DC), introduced on the HONOR Watch 5 Ultra. The feature is part of HONOR's health-study platform and uses heart-rate deceleration related signals to support heart-health risk screening research.
+I led development of the sudden cardiac arrest screening feature based on heart-rate deceleration capacity (DC), introduced on the HONOR Watch 5 Ultra. The project connects classical cardiac signal theory with multimodal representation learning for wearable heart-health screening research.
 
-Deceleration capacity is connected to autonomic regulation, especially the vagus nerve's ability to slow heart rate. In practice, the challenge is to bridge classical HRV/DC theory with large-scale wearable sensing: consumer devices collect long, noisy, behavior-dependent signals rather than controlled clinical recordings.
+ECG is the standard signal source for RR-interval-based DC estimation, but continuous daily monitoring is more natural on wearable PPG. The algorithmic challenge is to preserve clinically meaningful rhythm information while handling PPG quality variation in daily use.
 
-Core algorithmic themes:
+Public-facing algorithm themes:
 
-- **Classical cardiac signal theory.** Use deceleration capacity, rhythm variability, and related time-series descriptors as physiologically meaningful anchors.
-- **ECG/PPG representation learning.** Learn robust embeddings over physiological waveforms so the system can capture morphology and temporal context beyond hand-crafted features.
-- **Contrastive and predictive learning.** Use multimodal and temporal contrastive objectives to align ECG/PPG segments, separate signal artifacts from physiological variation, and improve label efficiency.
-- **Risk-oriented modeling.** Emphasize stable ranking, interpretable signal quality control, and clinically meaningful trend behavior rather than only point-estimate accuracy.
-- **Deployment under real-world variability.** Handle wearing state, motion, sensor noise, long-horizon monitoring, and health-study data pipelines.
+- **Deceleration capacity modeling.** Use established rhythm theory as the physiological anchor rather than treating the task as generic time-series regression.
+- **ECG/PPG representation learning.** Use synchronized signals to align wearable PPG representations with ECG-derived rhythm structure.
+- **Signal-quality awareness.** Account for motion, wearing state, missingness, and pulse-detection confidence during long-horizon monitoring.
+- **24-hour aggregation.** Combine interpretable rhythm features and learned representations into stable long-period screening outputs.
 
-This project connects my interest in contrastive representation learning with medical-domain algorithm delivery: the model must learn useful structure from noisy longitudinal data, while the feature still needs to respect physiology and product constraints.
+This project shows how contrastive learning can serve as a medical-domain transfer mechanism: ECG provides the standard rhythm reference, while PPG provides long-term wearable accessibility.

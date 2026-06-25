@@ -51,11 +51,11 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/books/";
               },
-            },{id: "post-modern-reinforcement-learning-objectives-bellman-targets-ppo-trpo-grpo-dapo-cispo-and-gspo",
+            },{id: "post-llm-rl-from-bellman-target-ppo-clip-to-token-sequence-ratio-and-training-inference-mismatch",
         
-          title: "Modern Reinforcement Learning Objectives: Bellman Targets, PPO/TRPO, GRPO, DAPO, CISPO, and GSPO",
+          title: "LLM RL: from Bellman Target, PPO Clip to Token/Sequence Ratio and Training-Inference Mismatch...",
         
-        description: "A technical map of Bellman targets, policy gradients, trust-region optimization, PPO clipping, RLHF, DPO, and token- versus sequence-level objectives in modern LLM reinforcement learning.",
+        description: "A structured reinforcement learning tutorial from Bellman targets and policy gradients to PPO, GRPO, DAPO, CISPO, GSPO, DPO, and training-inference mismatch.",
         section: "Posts",
         handler: () => {
           

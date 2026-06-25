@@ -1,16 +1,12 @@
 ---
 layout: post
-title: "Modern Reinforcement Learning Objectives: Bellman Targets, PPO/TRPO, GRPO, DAPO, CISPO, and GSPO"
+title: "LLM Reinforcement Learning: Bellman Targets, PPO Clipping, Token/Sequence Ratios, and Training-Inference Mismatch"
 date: 2026-06-25 00:00:00
-description: A technical map of Bellman targets, policy gradients, trust-region optimization, PPO clipping, RLHF, DPO, and token- versus sequence-level objectives in modern LLM reinforcement learning.
+description: A technical map of Bellman targets, value learning, policy gradients, PPO/TRPO, RLHF, DPO, and token- versus sequence-level objectives in modern LLM reinforcement learning.
 tags: reinforcement-learning policy-gradient llm-rl ppo rlhf
 categories: technical-notes
 featured: true
-toc:
-  sidebar: left
 ---
-
-# Bellman Target、Trust Region、PPO Clip 与 LLM Token/Sequence Ratio：强化学习目标函数的细节主线
 
 本文重点包括：
 
@@ -25,9 +21,23 @@ toc:
 
 - [0. 阅读和来源说明](#0-阅读和来源说明)
 - [Basic concepts](#basic-concepts)
+  - [Trajectory, Return, And Environment Model](#trajectory-return-and-environment-model)
+  - [State Value And Bellman Expectation](#state-value-and-bellman-expectation)
+  - [Bellman Optimality For State Value](#bellman-optimality-for-state-value)
+  - [Action Value And State-Action Bellman Equations](#action-value-and-state-action-bellman-equations)
 - [Basic algorithms](#basic-algorithms)
   - [Value-based RL](#value-based-rl)
+    - [Model-Based Dynamic Programming](#model-based-dynamic-programming)
+    - [Model-Free Value Learning](#model-free-value-learning)
+    - [DQN And Function Approximation](#dqn-and-function-approximation)
+    - [On-Policy Vs Off-Policy](#on-policy-vs-off-policy)
   - [Policy-based RL](#policy-based-rl)
+    - [Policy Gradient Theorem](#policy-gradient-theorem)
+    - [REINFORCE](#reinforce)
+    - [REINFORCE With Baseline](#reinforce-with-baseline)
+    - [Q Actor-Critic](#q-actor-critic)
+    - [Advantage Actor-Critic](#advantage-actor-critic)
+    - [Off-Policy Actor-Critic](#off-policy-actor-critic)
 - [Modern algorithms](#modern-algorithms)
   - [TRPO -> PPO](#trpo--ppo-从约束优化到裁剪代理目标)
   - [PPO](#proximal-policy-optimization-ppo)
@@ -65,21 +75,43 @@ toc:
 
 本节采用 Sutton & Barto 常见记号：时刻 $t$，智能体处于状态 $S_t$，按策略 $\pi$ 选择动作 $A_t$，环境转移到 $S_{t+1}$ 并返回即时奖励 $R_{t+1}$。大写字母表示随机变量，小写字母表示随机变量的具体取值。
 
-- trajectory: a state-action-reward chain $S_t \xrightarrow{A_t} S_{t+1}, R_{t+1} \xrightarrow{A_{t+1}} S_{t+2}, R_{t+2} \cdots$
-- discounted return along a trajectory
-- definition: $G_t = R_{t+1} + \gamma R_{t+2} + \cdots = \sum_{k=0}^{\infty} \gamma^{k} R_{t+1+k}$
-- recursive formula: $G_t = R_{t+1} + \gamma G_{t+1}$
-- system model
-- state transition probability $p(s'|s,a)$
-- reward probability $p(r|s,a)$
-- state value $v_\pi(s)$
-- definition:
+## Trajectory, Return, And Environment Model
+
+Trajectory 是强化学习里最基本的数据对象：它不是独立样本集合，而是一条由策略和环境共同生成的随机链。
+
+$$
+S_t \xrightarrow{A_t} S_{t+1}, R_{t+1} \xrightarrow{A_{t+1}} S_{t+2}, R_{t+2} \cdots
+$$
+
+Discounted return 把未来奖励压回当前时刻：
+
+$$
+G_t = R_{t+1} + \gamma R_{t+2} + \cdots = \sum_{k=0}^{\infty} \gamma^{k} R_{t+1+k}
+$$
+
+递推写法是：
+
+$$
+G_t = R_{t+1} + \gamma G_{t+1}
+$$
+
+如果环境模型已知，最核心的两个概率对象是状态转移和奖励分布：
+
+$$
+p(s'|s,a), \quad p(r|s,a)
+$$
+
+这两个对象决定 model-based dynamic programming 是否可用；如果它们未知，就要转向 MC、TD、Sarsa、Q-learning 这类 model-free 采样算法。
+
+## State Value And Bellman Expectation
+
+State value 衡量“从状态 $s$ 出发并继续执行策略 $\pi$，未来总回报的期望”：
 
 $$
 v_\pi(s) = \mathbb{E}[G_t|S_t=s] = \mathbb{E}[R_{t+1}|S_t=s] + \gamma\mathbb{E}[G_{t+1}|S_t=s]
 $$
 
-- Bellman expectation equation (element-wise / matrix / expectation form):
+Bellman expectation equation 把 $v_\pi(s)$ 拆成即时奖励和下一个状态价值。它的元素形式、矩阵形式和 expectation form 是同一件事的三种写法：
 
 $$
 \begin{aligned}
@@ -92,7 +124,7 @@ $$
 
 解读：当前状态价值 = 即时奖励期望 + 下一个状态价值期望。元素形式、矩阵形式和 expectation form 的展开证明见 [Bellman expectation equation 推导](#bellman-expectation-equation-推导)。
 
-- Bellman equation (matrix-vector form): suppose states are indexed as $s_i$ for $i=1,\dots,n$, where $n=|\mathcal{S}|$.
+如果状态按 $s_i$ 编号，状态数记为 $n=\lvert\mathcal{S}\rvert$，矩阵形式中的转移矩阵为：
 
 $$
 \begin{aligned}
@@ -102,17 +134,20 @@ v_\pi(s_i) &= r_\pi(s_i)+\gamma\sum_{s_j\in\mathcal{S}}p_\pi(s_j|s_i)v_\pi(s_j).
 \end{aligned}
 $$
 
-Here $P_\pi$ is a nonnegative stochastic matrix, so each row sums to 1.
+$P_\pi$ 是非负随机矩阵，每一行和为 1。由此可以得到两类求解方式：
 
-- close-form solution: $v_\pi = (I -\gamma P_\pi)^{-1} r_\pi$, where invertible can be proved by Gershgorin circle theorem
-- iterative solution: $v_{k+1} = r_\pi + \gamma P_\pi v_k,\quad k = 0, 1, 2, \dots$, convergence proved by showing error $v_k - v_\pi$ converge to 0
-- Bellman optimality equation (BOE) (element-wise form)
+1. Closed-form solution: $v_\pi = (I -\gamma P_\pi)^{-1} r_\pi$，可逆性可用 Gershgorin circle theorem 证明。
+2. Iterative solution: $v_{k+1} = r_\pi + \gamma P_\pi v_k,\quad k = 0, 1, 2, \dots$，收敛性可通过证明误差 $v_k - v_\pi$ 收敛到 0 得到。
+
+## Bellman Optimality For State Value
+
+Bellman expectation equation 评估给定策略；Bellman optimality equation 直接问“当前状态下能达到的最优价值是多少”。元素形式是：
 
 $$
 v(s)=\max_{\pi(s)\in\Pi(s)}\sum_{a\in\mathcal{A}}\pi(a|s)q(s,a)
 $$
 
-- Bellman optimality equation (BOE) (matrix-vector form)
+矩阵形式可以写成非线性固定点问题：
 
 $$
 \begin{aligned}
@@ -124,8 +159,9 @@ v &= \max_{\pi\in\Pi}(r_\pi+\gamma P_\pi v)=f(v),\\
 \end{aligned}
 $$
 
-- contraction property: the nonlinear $v = f(v)$ has a fixed point solution $v^{\ast}$ by contraction mapping theorem. The contraction proof can be checked in [Bellman optimality contraction](#bellman-optimality-contraction)。
-- BOE solution solved by value iteration:
+因为 $f$ 是 contraction，非线性方程 $v=f(v)$ 有唯一固定点 $v^{\ast}$。证明见 [Bellman optimality contraction](#bellman-optimality-contraction)。
+
+Value iteration 就是在反复应用这个 contraction：
 
 $$
 \begin{aligned}
@@ -139,43 +175,44 @@ f(v_k)=\max_{\pi\in\Pi}(r_\pi+\gamma P_\pi v_k),
 \end{aligned}
 $$
 
-- The optimal policy after solving $v^{\ast}$:
+求出 $v^{\ast}$ 后，最优策略由 greedy improvement 给出：
 
 $$
 \pi^{\ast} = \mathrm{argmax}_{\pi\in\Pi}(r_\pi+\gamma P_\pi v^{\ast})
 $$
 
-- action value $q_\pi(s,a)$
-- definition: $q_\pi(s,a) = \mathbb{E}[G_t|S_t=s,A_t=a]$
-- relation with state value: $v_\pi(s) = \sum_{a\in\mathcal{A}}\pi(a|s)q_\pi(s,a)$
-- Bellman equation (element-wise form):
+## Action Value And State-Action Bellman Equations
+
+Action value 衡量“已经在状态 $s$ 选定动作 $a$ 后，再继续执行策略 $\pi$ 的未来总回报期望”：
+
+$$
+q_\pi(s,a) = \mathbb{E}[G_t|S_t=s,A_t=a]
+$$
+
+它和 state value 的关系是：
+
+$$
+v_\pi(s) = \sum_{a\in\mathcal{A}}\pi(a|s)q_\pi(s,a)
+$$
+
+给定 $(s,a)$ 后，第一步动作已经不再由策略采样，因此动作价值的 Bellman expectation equation 先展开环境，再展开下一状态的策略：
 
 $$
 q_\pi(s,a) = \sum_{r\in\mathcal{R}}p(r|s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s'|s,a)v_\pi(s')
 $$
 
-总结动作价值函数的多种表达形式：
+等价地，可以完全写成 action-value 递推：
 
 $$
 \begin{aligned}
-q_\pi(s,a) &= \sum_{r\in\mathcal{R}}p(r|s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s'|s,a) (\sum_{a'\in\mathcal{A}}\pi(a'|s')q_\pi(s',a')) \\
-q_\pi(s,a) &= \mathbb{E}[R_{t+1} + \gamma q_\pi(S_{t+1},A_{t+1})|S_t=s,A_t=a]
+q_\pi(s,a) &= \sum_{r\in\mathcal{R}}p(r|s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s'|s,a) \left(\sum_{a'\in\mathcal{A}}\pi(a'|s')q_\pi(s',a')\right) \\
+q_\pi(s,a) &= \mathbb{E}[R_{t+1} + \gamma q_\pi(S_{t+1},A_{t+1})|S_t=s,A_t=a].
 \end{aligned}
 $$
 
-The equivalence can be proved by $p(s',a'|s,a) = p(s'|s,a)\pi(a'|s')$ by conditional independence.
+上面两个式子的等价性来自条件独立分解 $p(s',a'|s,a)=p(s'|s,a)\pi(a'|s')$。直觉上，采取动作 $a_t$ 的价值 = 这个动作带来的即时奖励 + 它导致的下一状态的平均动作价值。
 
-解读：采取动作 $a_t$ 的价值 = $a_t$ 带来的即时奖励 + $a_t$ 导致的下一状态的平均价值
-
-- Bellman equation (matrix-vector form): replace $v_\pi(s')$ by $q_\pi(s,a)$.
-
-$$
-\begin{aligned}
-q_\pi(s,a) = \sum_{r\in\mathcal{R}}p(r|s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s'|s,a) (\sum_{a'\in\mathcal{A}}\pi(a'|s')q_\pi(s',a'))
-\end{aligned}
-$$
-
-The same relation can be written as a vector equation over state-action pairs:
+在所有 state-action pair 上写成向量方程：
 
 $$
 \begin{aligned}
@@ -188,12 +225,12 @@ q_\pi &= \tilde r+\gamma P\Pi q_\pi,\\
 \end{aligned}
 $$
 
-- Bellman optimality equation (BOE)
+Action value 的 Bellman optimality equation 是 Q-learning 和 DQN 的直接来源：
 
 $$
 \begin{aligned}
 q^{\ast}(s,a) &= r(s,a) + \gamma\sum_{s'\in\mathcal{S}} p(s'|s,a) \max_{a'} q^{\ast}(s',a') \\
-q^{\ast}(s,a) &= \mathbb{E}[R_{t+1} + \gamma \max_{a'} q^{\ast}(S_{t+1},a')|S_t=s,A_t=a]
+q^{\ast}(s,a) &= \mathbb{E}[R_{t+1} + \gamma \max_{a'} q^{\ast}(S_{t+1},a')|S_t=s,A_t=a].
 \end{aligned}
 $$
 
@@ -201,153 +238,175 @@ $$
 
 ## Value-based RL
 
-### Dynamic Programming Algorithm
+Value-based 方法的主线是：先估计 $v(s)$ 或 $q(s,a)$，再通过 greedy 或 $\epsilon$-greedy 从价值函数中导出策略。分支之间最关键的区别不是名字，而是 target 怎么构造、是否 bootstrap、是否依赖环境模型、是否 on-policy。
 
-解读：已知环境模型，即奖励概率 $p(r|s,a)$ 和状态转移概率 $p(s'|s,a)$，其中奖励概率进一步得到 $r(s,a) = \sum_r p(r|s,a)r$，分布代表在状态 $s$ 做动作 $a$ 后，会以什么概率到达各个下一状态 $s'$，以及平均会拿多少奖励
+### Model-Based Dynamic Programming
 
-- Value Iteration (1-step truncated policy iteration)
+Dynamic programming 假设环境模型已知，即奖励概率 $p(r|s,a)$ 和状态转移概率 $p(s'|s,a)$ 可用。奖励概率可以进一步得到 $r(s,a)=\sum_r p(r|s,a)r$，转移概率告诉我们在状态 $s$ 执行动作 $a$ 后，会以什么概率到达各个 $s'$。
 
-实际上在做迭代算法求解 BOE: $v_{k+1} = f(v_k) = \max_{\pi\in\Pi}(r_\pi + \gamma P_\pi v_k)$
+#### Value Iteration
 
-1. policy update
+Value iteration 是 1-step truncated policy iteration。它直接迭代 Bellman optimality operator：
 
-- matrix form: $\pi_{k+1} = \mathrm{argmax}(r_\pi + \gamma P_\pi v_k)$
-- element-wise form: $\pi_{k+1}(a|s) = \mathrm{argmax}\sum_a \pi(a|s) q_k(s,a)$
+$$
+v_{k+1} = f(v_k) = \max_{\pi\in\Pi}(r_\pi + \gamma P_\pi v_k)
+$$
 
-2. value update
+每一步可以拆成 policy update 和 value update：
 
-- matrix form: $v_{k+1} = r_{\pi_{k+1}} + \gamma P_{\pi_{k+1}} v_k$
-- element-wise form: $v_{k+1} = \sum_a \pi_{k+1}(a|s) q_k(s,a)$
+$$
+\pi_{k+1} = \mathrm{argmax}_{\pi}(r_\pi + \gamma P_\pi v_k)
+$$
 
-summary: start with $v_0$, $v_k(s) \rightarrow q_k(s,a) \rightarrow a^{\ast}(s) \rightarrow \pi_{k+1}(a|s) \rightarrow v_{k+1}(s)$ until a certain criterion of $v_k$ is satisfied
+$$
+v_{k+1} = r_{\pi_{k+1}} + \gamma P_{\pi_{k+1}} v_k
+$$
 
-- Policy Iteration ($\infty$-step truncated policy iteration)
+元素视角下，流程是：
 
-1. policy evaluation
+$$
+v_k(s) \rightarrow q_k(s,a) \rightarrow a^{\ast}(s) \rightarrow \pi_{k+1}(a|s) \rightarrow v_{k+1}(s)
+$$
 
-- matrix form: $v_{\pi_k} = r_{\pi_k} + \gamma P_{\pi_k} v_{\pi_k}$, i.e., solving Bellman equation, another iterative algorithm embedded $v_{\pi_k}^{(j+1)} = r_{\pi_k} + \gamma P_{\pi_k} v_{\pi_k}^{(j)}$
-- element-wise form: $v_{\pi_k}^{(j+1)}(s) = \sum_a \pi(a|s) q_{\pi_k}^{(j)}(s,a)$
+#### Policy Iteration
 
-2. policy improvement
+Policy iteration 是 $\infty$-step truncated policy iteration：先把当前策略评估充分，再做策略改进。
 
-- matrix form:
+Policy evaluation 解 Bellman expectation equation：
+
+$$
+v_{\pi_k} = r_{\pi_k} + \gamma P_{\pi_k} v_{\pi_k}
+$$
+
+实际计算中常嵌入迭代：
+
+$$
+v_{\pi_k}^{(j+1)} = r_{\pi_k} + \gamma P_{\pi_k} v_{\pi_k}^{(j)}
+$$
+
+Policy improvement 基于当前策略的动作价值做 greedy 更新：
 
 $$
 \pi_{k+1} = \mathrm{argmax}_{\pi}(r_\pi+\gamma P_{\pi}v_{\pi_k})
 $$
 
-- element-wise form:
-
 $$
 \pi_{k+1} = \mathrm{argmax}_{\pi}\sum_a\pi(a|s)q_{\pi_k}(s,a)
 $$
 
-summary: start with $\pi_0$, $\pi_k \rightarrow v_{\pi_k} \rightarrow q_{\pi_k}(s,a) \rightarrow a^{\ast}(s) \rightarrow \pi_{k+1}$ until a certain criterion of $v_{\pi_k}^{(j)}$ is satisfied
+这里 $q_{\pi_k}(s,a)$ 的作用很关键：policy evaluation 先估计 $v_{\pi_k}(s)$，再通过 system model 得到 $q_{\pi_k}(s,a)$；policy improvement 基于 $q_{\pi_k}(s,a)$ 得到新的 $\pi_{k+1}$。
 
-动作价值 $q_\pi(s,a)$ 在 Policy Iteration 中的重要性：
+### Model-Free Value Learning
 
-- policy evaluation 先估计 $v_{\pi_k}(s,a)$，再通过 system model 得到 $q_{\pi_k}(s,a)$
-- policy improvement 中机基于 $q_{\pi_k}(s,a)$ 得到新的策略 $\pi_{k+1}$
+Model-free 方法不直接使用 $p(s'|s,a)$ 和 $p(r|s,a)$，而是从采样轨迹构造目标。MC、TD、Sarsa、Q-learning 的差别主要体现在 target 的随机变量数量、是否等 episode 结束、以及下一步动作来自真实采样还是贪心最大化。
 
-### model-free
+#### Monte Carlo Control
 
-- MC-based RL
-- MC Basic (calculate action values from experience samples)
+Monte Carlo 用完整 episode 的 return 来估计动作价值：
 
-1. policy evaluation
+$$
+q_{\pi_k}(s,a) = \mathbb{E}[G_t|S_t=s,A_t=a]
+$$
 
-- definition of action value $q_{\pi_k}(s,a) = \mathbb{E}[G_t|S_s=s,A_t=a]$
-- starting from $(s,a)$, following $\pi_k$，obtain $n$ episodes and the return of the $i$-th episode is $g_{\pi_k}^{(i)}(s,a)$, then $q_{\pi_k}(s,a) \approx q_k(s,a) = \frac{1}{n}\sum_{i=1}^{n} g_{\pi_k}^{(i)}(s,a)$
+从 $(s,a)$ 出发并继续执行 $\pi_k$，若采到 $n$ 条 episode，第 $i$ 条回报为 $g_{\pi_k}^{(i)}(s,a)$，则：
 
-2. policy improvement the same as policy iteration
+$$
+q_{\pi_k}(s,a) \approx q_k(s,a) = \frac{1}{n}\sum_{i=1}^{n} g_{\pi_k}^{(i)}(s,a)
+$$
 
-- MC exploring Starts
+MC control 的 policy improvement 和 policy iteration 类似，但样本使用方式可以不同：first visit / every visit 决定一条 episode 中同一状态动作对如何计数；exploring starts 或 $\epsilon$-greedy 决定是否能覆盖足够多的状态动作对。
 
-1. utilize samples: first visit / every visit instead of initial visit
-2. update policy: use return of single episode instead of all ones
+MC 的特征是 non-bootstrapping、低偏差、高方差、非增量式。它必须等 episode 结束才能得到 $G_t$，因此长 episode 下学习信号来得慢。
 
-- MC $\epsilon$-Greedy
-- for soft policy
-- note probability of $x\lt\epsilon$ for randomly selecting actions includes "may select the greedy action again"
-- summary: non-bootstrapping, high estimation variance & low bias, non-incremental (must wait until an episode has been collected)
+#### TD(0) Policy Evaluation
 
-- TD(temporal difference) learning
-- Basic TD learning (estimate state values)
-- algorithm:
+TD learning 用 one-step bootstrap target 估计状态价值：
 
 $$
 v_{t+1}(s_t) = v_t(s_t) -\alpha_t(s_t) \left[ v_t(s_t) - \left(r_{t+1}+\gamma v_t(s_{t+1})\right) \right]
 $$
 
-For all $s\neq s_t$, the estimate remains unchanged. TD target and TD error are:
+对所有 $s\neq s_t$，估计保持不变。TD target 和 TD error 是：
 
 $$
 \bar v_t = r_{t+1}+\gamma v_t(s_{t+1}), \quad \delta_t = v(s_t)-\bar v_t.
 $$
 
-- derivation: apply Robbins-Monro algorithm to solve Bellman expectation equation $v_\pi(s) = \mathbb{E}[R_{t+1}+\gamma v_\pi(S_{t+1})|S_t=s]$
-- summary:
-
-1. the algorithm attempts to drive $v_t(s_t)$ to $\bar{v}_t$
-2. TD error reflects discrepancy between estimate $v_t$ and true state value $v_\pi$, so TD error is zero in expectation sense when $v_t$ is accurate
-3. bootstrapping, low estimation variance (due to fewer variables involved) & high bias, incremental (update once receiving an experience sample)
-
-- Sarsa (estimate action values)
-- algorithm: $q_{t+1}(s_t,a_t) = q_t(s_t,a_t) - \alpha_t(s_t,a_t)[q_t(s_t,a_t) - (r_{t+1} + \gamma q_t(s_{t+1}, a_{t+1}))]$, and remains unchanged for all $(s,a) \neq (s_t,a_t)$.
-- derivation: apply Robbins-Monro algorithm to solve Bellman expectation equation in terms of action, $q_\pi(s,a) = \mathbb{E}[R_{t+1}+\gamma q_\pi(S_{t+1},A_{t+1})|S_t=s,A_t=a]$
-- summary
-- Sarsa is a stochastic approximation algorithm for solving for Bellman (expectation) equation of given policy
+这个更新可以看作把 Robbins-Monro stochastic approximation 用在 Bellman expectation equation 上：
 
 $$
-\begin{aligned}
-q_\pi(s,a) = \mathbb{E}[R + \gamma q_\pi(S',A'|s,a)]
-\end{aligned}
+v_\pi(s) = \mathbb{E}[R_{t+1}+\gamma v_\pi(S_{t+1})|S_t=s]
 $$
 
-- 交替进行策略评估和策略改进 (更新的 target 和 交互环境的 behavior 策略都是 $\epsilon$-greedy 策略)
-- on-policy:
-- samples: $s_t \xrightarrow{\pi_b} a_t \xrightarrow{model} r_{t+1}, s_{t+1} \xrightarrow{\pi_b} a_{t+1}$
-- evaluation of target policy $\pi_T$ relies on $r_{t+1}, s_{t+1}, a_{t+1}$, where $a_{t+1}$ is generated following behavior policy $\pi_b$，即生成下一个动作 $a_{t+1}$ 用于估计 q-value 的策略和与环境交互的策略是同一个
-- Sarsa 估计的是当前行为策略的价值，因此会规避探索带来的风险
+TD 的特征是 bootstrapping、低方差、高偏差、增量式；每收到一个 transition 就能更新一次。
 
-- Q-learning
-- algorithm: $q_{t+1}(s_t,a_t) = q_t(s_t,a_t) - \alpha_t(s_t,a_t)[q_t(s_t,a_t) - (r_{t+1} + \gamma \max_{a\in\mathcal{A}(s_{t+1})} q_t(s_{t+1}, a))]$, remains unchanged for all $(s,a) \neq (s_t,a_t)$.
-- derivation: apply Robbins-Monro algorithm to solve Bellman optimality equation in terms of action, $q(s,a) = \mathbb{E}[R_{t+1} + \gamma \max_{a\in\mathcal{A}(S_{t+1})} q(S_{t+1},a)|S_t=s,A_t=a]$
-- summary:
-- Q-learning is a stochastic approximation algorithm for solving for Bellman optimal equation, the optimal solution satisfies
+#### Sarsa
+
+Sarsa 是对 action value 的 on-policy TD control。它的 target 使用真实采样到的下一动作 $a_{t+1}$：
 
 $$
-\begin{aligned}
+q_{t+1}(s_t,a_t) =
+q_t(s_t,a_t) - \alpha_t(s_t,a_t)
+\left[
+q_t(s_t,a_t) - \left(r_{t+1} + \gamma q_t(s_{t+1}, a_{t+1})\right)
+\right]
+$$
+
+其余 $(s,a) \neq (s_t,a_t)$ 保持不变。这个更新对应 action-value Bellman expectation equation：
+
+$$
+q_\pi(s,a) = \mathbb{E}[R + \gamma q_\pi(S',A')|s,a]
+$$
+
+采样链路是：
+
+$$
+s_t \xrightarrow{\pi_b} a_t \xrightarrow{model} r_{t+1},s_{t+1} \xrightarrow{\pi_b} a_{t+1}
+$$
+
+Sarsa 的 target policy 和 behavior policy 都是同一个 $\epsilon$-greedy 策略，因此它估计的是当前行为策略的价值，会把探索动作带来的风险也计入价值估计。
+
+#### Q-learning
+
+Q-learning 是 off-policy TD control。它的 target 不使用真实采样的 $a_{t+1}$，而是使用下一状态上的 greedy action：
+
+$$
+q_{t+1}(s_t,a_t) =
+q_t(s_t,a_t) - \alpha_t(s_t,a_t)
+\left[
+q_t(s_t,a_t) - \left(r_{t+1} + \gamma \max_{a\in\mathcal{A}(s_{t+1})} q_t(s_{t+1}, a)\right)
+\right]
+$$
+
+它对应 Bellman optimality equation：
+
+$$
 q^{\ast}(s,a) = \mathbb{E}[R_{t+1} + \gamma \max_{a\in\mathcal{A}(S_{t+1})} q^{\ast}(S_{t+1},a)|S_t=s,A_t=a]
-\end{aligned}
 $$
 
-- 价值迭代(利用Bellman Optimality Equation 直接估计最优动作价值函数)是通过 greedy 策略，而与环境交互的是 $\epsilon$-greedy 策略
-- off-policy (can be implemented on/off-policy):
-- samples: $s_t \xrightarrow{\pi_b} a_t \xrightarrow{model} r_{t+1}, s_{t+1}$
-- the estimation of $q(s,a)$ relies on $r_{t+1}, s_{t+1}$, which does not involve $\pi_b$，估计 q-value 时使用的策略是 greedy，但是与环境交互的是 $\epsilon$-greedy
-- Q-learning 估计的是最优策略的价值，与当前行为策略的探索无关
-
-- DQN (deep Q-learning)
-- objective: the squared Bellman optimality error
+采样链路只需要：
 
 $$
-\begin{aligned}
+s_t \xrightarrow{\pi_b} a_t \xrightarrow{model} r_{t+1},s_{t+1}
+$$
+
+行为策略可以是 $\epsilon$-greedy，但 target policy 是 greedy。Q-learning 估计的是最优策略价值，与当前行为策略的探索动作不完全绑定。
+
+### DQN And Function Approximation
+
+DQN 把 Q-learning 的表格 $q(s,a)$ 替换为神经网络 $\hat q(s,a,w)$。训练目标是 squared Bellman optimality error：
+
+$$
 J(w) = \mathbb{E}[(R + \gamma \max_{a'\in\mathcal{A}(S')} \hat{q}(S',a',w_T) - \hat{q}(S,A,w))^{2}]
-\end{aligned}
 $$
 
-if the same parameters $w$ appear in both the target and prediction terms, the target moves at the same time as the prediction. DQN therefore uses $w$ for the online network and $w_T$ for the target network.
-
-- gradient of $J$ is
+如果 target 和 prediction 使用同一组参数 $w$，目标会随着预测一起移动，所以 DQN 使用 online network $w$ 和 target network $w_T$。梯度为：
 
 $$
-\begin{aligned}
 \nabla_w J = -2\mathbb{E}[(R + \gamma \max_{a'\in\mathcal{A}(S')} \hat{q}(S',a',w_T) - \hat{q}(S,A,w)) \nabla_w \hat{q}(S,A,w)]
-\end{aligned}
 $$
 
-- algorithm: $(r + \gamma \max_{a'\in\mathcal{A}(s')}\hat{q}(s',a',w_T) - \hat{q}(s,a,w))^{2}$
+代码化实现要点是：`gather` 取真实执行动作的 Q 值，target network 只生成 bootstrap target，不接收当前 loss 的梯度。
 
 ```python
         # batch 来自 replay buffer: (s, a, r, done, s_next)
@@ -365,31 +424,46 @@ $$
         dqn_loss = torch.nn.functional.mse_loss(q_sa, td_target)
 ```
 
-- $\max$ 过高估计问题：如果所有动作的估计都带有噪声，那么最大值更容易选中被噪声推高的动作。因此，即使每个单独的 Q 值估计在平均意义下没有偏差， $\max$ 之后的估计也可能偏高：
+#### Overestimation And Double DQN
+
+如果所有动作估计都带噪声，max operator 更容易选中被噪声推高的动作，所以最大化会带来过高估计：
 
 $$
 \mathbb{E}[\max_a \hat{q}(s,a,w_T)] \ge \max_a\mathbb{E}[\hat{q}(s,a,w_T)]
 $$
 
-- “致命三元组”问题（The Deadly Triad）
-- 函数逼近误差：对特定状态-动作对 $(s,a)$ 的价值估计进行更新时，由于共享参数，会隐含地改变其他（可能不相关）状态-动作对的估计值
-- 离线策略数据分布： $\pi_b$ 可能与 $\pi_T$ 不同，使用 $\pi_b$ 收集的数据来更新策略用以趋向于从 $\pi_T$ 推导的目标，如 TD target 时，我们实际上是在根据目标策略在实际执行时可能不会遇到的状态和动作分布来评估它。函数逼近器可能因此被迫外推这些“离策略”动作的价值，导致时序差分目标中可能出现较大误差
-- 自举更新（Bootstrapping）：更新目标包含了下一个状态的估计值 $\hat{q}(s',a,w)$，如果这个估计值不准确（由于函数逼近误差或离策略数据外推），误差就会被“自举”到 $\hat{q}(s,a,w)$ 中。Q-learning 的 $\max$ 寻找下一个状态的最大（可能被高估的）Q 值。如果在状态 $s'$ 函数逼近器错误地将高值分配给行为策略很少或从未采取过的动作 $a'$，那么这个被高估的值将被用于目标中，从而可能增加 $\hat{q}(s,a,w)$ 的价值估计。这会产生一个反馈循环，使得逼近误差和离策略外推被自举放大，可能导致发散
-- 解决方案：
-- two networks: online network $w$ updates in every gradient step, and target network $w_T$ copies $w$ every $C$ iterations
-- experience replay: collect $\mathcal{B} = \lbrace(s,a,r,s')\rbrace$ as replay buffer, and sample transitions approximately uniformly to break the correlation between sequential samples generated by $\pi_b$
-- Implementation: DQN 原始论文的做法：训练循环里，每执行一步动作就立即从回放池采样训练一次。一边收集数据边训练，最大化数据利用效率
-- 其他优化：
-- Prioritized Experience Replay（优先经验回放）: 给 TD Error 大的经验更高的采样概率，再用重要性权重修正非均匀采样带来的偏差。在标准的经验回放中，旧经验按照先进先出（FIFO）的方式被淘汰。确实有可能一条关键经验被淘汰，但由于训练初期回放池还没满，关键经验通常会被多次采样到
-- Double DQN: 把“选择动作”和“评估动作”分开。它先用当前网络选择动作，再用目标网络评价这个动作：
+Double DQN 把“选择动作”和“评估动作”分开：online network 选动作，target network 评价该动作。
 
 $$
 a^{\ast} = \mathrm{argmax}_{a\in\mathcal{A}(s')}\hat q(s',a,w), \quad y = r+\gamma\hat q(s',a^{\ast},w_T).
 $$
 
-两个网络的误差不再通过同一个最大值运算直接叠加，q-value 过高估计的问题得到缓解
+两个网络的误差不再通过同一个最大值运算直接叠加，q-value 过高估计得到缓解。
 
-- Dueling DQN: 改变网络架构，适用动作差异不明显的状态场景 $q(s,a) = v(s) + A(s,a) - \frac{1}{|\mathcal{A}|}\sum_{a'\in\mathcal{A}} A(s,a')$, $v(s)$ is a scalar, $A(s,a)$ produces action dimension
+#### Deadly Triad And Stabilization
+
+“致命三元组”指 function approximation、off-policy data、bootstrapping 同时出现时可能导致发散：
+
+1. 函数逼近误差：更新一个 $(s,a)$ 时，共享参数会隐含改变其他状态动作对。
+2. 离策略数据分布：behavior policy 和 target policy 不同，函数逼近器会被迫外推目标策略可能很少访问的状态或动作。
+3. 自举更新：TD target 包含下一状态的估计值，估计误差会被继续传播。
+
+DQN 的基本稳定化手段是 target network 和 replay buffer：
+
+1. online network $w$ 每个 gradient step 更新；target network $w_T$ 每隔 $C$ 次迭代复制 $w$。
+2. replay buffer 存储 $\mathcal{B} = \lbrace(s,a,r,s')\rbrace$，近似均匀采样以打破连续样本相关性。
+
+原始 DQN 的训练方式是边交互边训练：每执行一步动作就从回放池采样训练一次，提高数据利用效率。
+
+#### Dueling DQN
+
+Dueling DQN 改变网络架构，把状态价值和动作优势拆开：
+
+$$
+q(s,a) = v(s) + A(s,a) - \frac{1}{|\mathcal{A}|}\sum_{a'\in\mathcal{A}} A(s,a')
+$$
+
+这个结构适合很多动作差异不明显的状态。实现上通常是共享 backbone 后接 value head 和 advantage head：
 
 ```python
             features = backbone(states)
@@ -398,18 +472,21 @@ $$
             q_values = values + advantages - advantages.mean(dim=1, keepdim=True)
 ```
 
-- 关于 on-policy & off-policy 的总结：
-- 定义: target policy $\pi_T$ 将要评估或者改进的策略叫做目标策略；behavior policy $\pi_b$ 实际与环境交互用来决定动作的策略，二者相同代表on-policy
-- Sarsa is on-policy: 更新的 target policy 是 $\epsilon$-greedy policy，和采取动作的 behavior policy 是相同的策略
-- Q-learning is off-policy: 更新的 target policy 是 greedy policy，而采取动作的 behavior policy 是另一个不同的 $\epsilon$-greedy policy
+### On-Policy Vs Off-Policy
+
+Target policy $\pi_T$ 是将要评估或改进的策略；behavior policy $\pi_b$ 是实际和环境交互、产生动作的策略。二者相同就是 on-policy，二者不同就是 off-policy。
+
+Sarsa 是 on-policy：更新的 target policy 是 $\epsilon$-greedy policy，和采取动作的 behavior policy 相同。
+
+Q-learning 是 off-policy：更新目标使用 greedy policy，而采样数据可以来自另一个 $\epsilon$-greedy behavior policy。
 
 ## Policy-based RL
 
-DQN 在训练好之后对同一个状态永远输出同一个动作（确定性策略）；策略网络对同一个状态有可能输出不同的动作（随机性策略），其输出的不是动作分数而是概率分布（离散动作：输出各个动作概率 by softmax；连续动作：输出高斯分布参数）。这种随机性不是缺陷，而是特性——它天然包含探索，不需要额外的 $\epsilon$-greedy
+DQN 训练好后对同一个状态通常输出同一个 greedy 动作；策略网络直接输出动作分布。离散动作场景中，它输出 softmax 概率；连续动作场景中，它输出高斯分布等参数。随机性不是缺陷，而是策略优化的核心：探索和优化都在概率分布上发生。
 
-### 策略梯度定理
+### Policy Gradient Theorem
 
-策略梯度把“提高好动作概率、降低坏动作概率”写成可反向传播的目标。主流可用形式是
+策略梯度把“提高好动作概率、降低坏动作概率”写成可反向传播的目标。主流可用形式是：
 
 $$
 \nabla_\theta J(\theta) = \mathbb{E}_{s_t,a_t} \left[ \nabla_\theta\log\pi_\theta(a_t|s_t)A^{\pi}(s_t,a_t) \right], \quad A^{\pi}(s,a)=Q^{\pi}(s,a)-V^{\pi}(s).
@@ -417,7 +494,7 @@ $$
 
 完整证明见 [策略梯度定理证明](#策略梯度定理证明)。那里会说明 trajectory likelihood-ratio、reward-to-go、baseline/advantage 和 discounted occupancy 形式之间的关系。
 
-在代码里只需要抓住两点：第一，采样数据应来自当前策略或带重要性采样修正；第二，advantage 是权重，通常不让 actor loss 反向更新 critic。
+代码里只需要抓住两点：采样数据应来自当前策略或带重要性采样修正；advantage 是 actor 更新的权重，通常不让 actor loss 反向更新 critic。
 
 ```python
 # states/actions 来自当前策略采样的 rollout；old data 不能随便复用，否则分布已经变了。
@@ -430,22 +507,21 @@ policy_loss = -(log_probs * advantages.detach()).mean()
 policy_loss.backward()
 ```
 
-- gradient-ascent algorithm:
+梯度上升写法：
 
 $$
 \theta_{t+1}=\theta_t+\alpha\nabla_\theta\log\pi_{\theta_t}(a_t|s_t)\hat{A}_t
 $$
 
-- gradient-descent loss:
+梯度下降 loss 写法：
 
 $$
 \mathcal{L}_{PG}(\theta)=-\log\pi_\theta(a_t|s_t)\hat{A}_t
 $$
 
-### Basic algorithms
+### REINFORCE
 
-- Monte Carlo policy gradient (REINFORCE)
-- algorithm:
+REINFORCE 是 Monte Carlo policy gradient。它用完整轨迹回报估计 $q_\pi(S,A)$：
 
 $$
 \mathbb{E}_{s\sim S,A\sim\pi_\theta(S)}
@@ -454,12 +530,15 @@ $$
 \right]
 $$
 
-- implementation:
+实现流程：
 
-1. generate an episode $\lbrace s_0, a_0, r_1, \dots, s_{T-1}, a_{T-1}, r_T\rbrace$ following $\pi_\theta$
-2. at each time step $t$
+1. 按当前策略 $\pi_\theta$ 采样一条 episode：
 
-- obtain $q_t(s_t,a_t) = \sum_{k=t+1}^{T} \gamma^{k-t-1}r_k$ by MC estimation, this explain why needs to collect an episode before "every experience sample update" of $\theta$, a more efficent bootstep version:
+$$
+\lbrace s_0, a_0, r_1, \dots, s_{T-1}, a_{T-1}, r_T\rbrace
+$$
+
+2. 从后往前计算每个时刻的 return：
 
 ```python
             for reward in reversed(rewards):
@@ -467,23 +546,30 @@ $$
                 returns.insert(0, G)
 ```
 
-- $\theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t|s_t)q_t(s_t,a_t)$
-- on-policy: sampling following $\pi_\theta$ 必须用当前策略产生的数据。策略一更新，旧数据就失效了
-- cons: 高方差，MC estimation 从时刻 $t$ 到 episode 结束的累积回报，它包含了这段路径上的所有随机性。同一个动作，不同的采样轨迹可能给出截然不同的 $G_t$，其波动导致高方差
+3. 用 $q_t(s_t,a_t)=\sum_{k=t+1}^{T}\gamma^{k-t-1}r_k$ 更新策略：
+
+$$
+\theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t|s_t)q_t(s_t,a_t)
+$$
+
+REINFORCE 是 on-policy：采样必须来自当前策略。策略一更新，旧 episode 的分布就不再严格匹配。它的主要问题是高方差，因为 $G_t$ 包含从 $t$ 到 episode 结束的所有随机性。
 
 ```python
     # 前向传播：获取每个状态下的动作概率
     probs = policy(states_tensor)  # [T, action_dim]
+
     # 计算所采取动作的对数概率 log π(a_t|s_t)
     # gather(1, actions) 选取每个状态对应动作的概率
     action_probs = probs.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
     log_probs = torch.log(action_probs + 1e-8)  # 加小常数防止 log(0)
+
     # 策略梯度损失：-log π(a_t|s_t) * G_t
     loss = -(log_probs * returns_tensor).mean()
 ```
 
-- REINFORCE with baseline
-- algorithm:
+### REINFORCE With Baseline
+
+Baseline 的目标是降低方差而不改变梯度期望：
 
 $$
 \mathbb{E}_{s\sim d^{\pi},A\sim\pi_\theta(\cdot|S)}
@@ -492,39 +578,37 @@ $$
 \right]
 $$
 
-The baseline term has zero expectation:
+baseline 项期望为 0：
 
 $$
 \mathbb{E}_{s\sim S,A\sim\pi_\theta(S)} \left[ \nabla_\theta \ln\pi_\theta(A|S)b(S) \right] =0
 $$
 
-- choices of $b(s)$: reduce approximation variance
-
-1. optimal: by minimize the trace of $var(X)$, complex in practice
-2. suboptimal: choose the state value as baseline.
+理论最优 baseline 需要最小化梯度估计方差，实践中通常取 state value：
 
 $$
 b(s)=\mathbb{E}_{A\sim\pi}\left[q_\pi(s,A)\right]=v_\pi(s)
 $$
 
-- implementation: use MC estimation $g_t$ to approximate $q_t$.
+用 MC return $g_t$ 近似 $q_t$ 时，策略更新为：
 
 $$
 \theta_{t+1} = \theta_t+\alpha\nabla_\theta\ln\pi_{\theta_t}(a_t|s_t) \left(q_t(s_t,a_t)-v_\phi(s_t)\right)
 $$
 
-- 价值网络的训练：
+价值网络训练：
 
 $$
 \mathcal{L}_V(\phi)=\left(v_\phi(s_t)-g_t\right)^{2}
 $$
 
-- 策略网络的训练：使用优势 $A_t = g_t - v_\phi(s_t)$
+策略网络使用优势 $A_t=g_t-v_\phi(s_t)$：
 
 ```python
     # 价值网络学习 V(s)
     values = value_net(states_t)
     value_loss = nn.MSELoss()(values, returns_t)
+
     # 用优势更新策略
     with torch.no_grad():
         values_pred = value_net(states_t)
@@ -532,94 +616,139 @@ $$
     policy_loss = -(log_probs * advantages).mean()
 ```
 
-- Q Actor-critic (QAC)
-- implementation: at each time step $t$ in each episode
+### Q Actor-Critic
 
-1. generate $a_t$ following $\pi_\theta(a|s_t)$, observe $r_{t+1}, s_{t+1}$ and then generate $a_{t+1}$ following $\pi_\theta(a|s_{t+1})$
-2. the policy update is
+Q Actor-Critic 用一个 critic 近似 $q(s,a,w)$，再把它作为 actor 的策略梯度权重。每个时间步：
+
+1. 按 $\pi_\theta(a|s_t)$ 生成 $a_t$。
+2. 观察 $r_{t+1},s_{t+1}$。
+3. 再按 $\pi_\theta(a|s_{t+1})$ 生成 $a_{t+1}$。
+
+Actor 更新：
 
 $$
 \theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t|s_t)q(s_t,a_t, w_t)
 $$
 
-where $q_t(s_t,a_t)$ is approximated by TD learning, value update is
+Critic 用 TD 方式更新 action value：
 
 $$
 w_{t+1} = w_t + \alpha_w[r_{t+1} + \gamma q(s_{t+1}, a_{t+1}, w_t) - q(s_t, a_t, w_t)]\nabla_w q(s_t,a_t,w_t)
 $$
 
-- Advantage Actor-critic (A2C)
-- algorithm:
+QAC 的问题是需要维护 action-value critic；动作空间大或连续时，动作价值函数的学习会变得更难。
+
+### Advantage Actor-Critic
+
+A2C 把 actor 的权重从 $q_t(s_t,a_t)$ 改成 advantage：
 
 $$
 \theta_{t+1} = \theta_t+\alpha\nabla_\theta\ln\pi_{\theta_t}(a_t|s_t) \left[q_t(s_t,a_t)-v_t(s_t)\right]
 $$
 
-where $\delta_t(s_t,a_t)=q_t(s_t,a_t)-v_t(s_t)$ is the advantage function.
-
-- Advantage function can be estimated by TD error
+其中 $\delta_t(s_t,a_t)=q_t(s_t,a_t)-v_t(s_t)$ 是优势函数。优势可以用 TD error 估计：
 
 $$
-q_t(s_t,a_t) - v_t(s_t) \approx r_{t+1} + \gamma v_t(s_{t+1}) - v_t(s_t),
+q_t(s_t,a_t) - v_t(s_t) \approx r_{t+1} + \gamma v_t(s_{t+1}) - v_t(s_t)
 $$
 
-which can be proved by
+这个等价关系来自：
 
 $$
-q_\pi(s_t,a_t) - v_\pi(s_t) = \mathbb{E}[R_{t+1} + \gamma v_\pi(S_{t+1}) - v_\pi(S_t)|S_t=s_t,A_t=a_t],
+q_\pi(s_t,a_t) - v_\pi(s_t) = \mathbb{E}[R_{t+1} + \gamma v_\pi(S_{t+1}) - v_\pi(S_t)|S_t=s_t,A_t=a_t]
 $$
 
-- Summary:
-- return estimator $q_t(s,a)$ requires a network for action value, suboptimal baseline $v_t(s)$ requires a network for state value, original advantage function needs to maintain TWO networks
-- TD error estimation helps reduce to One network for state value
-- implementation: at each time step $t$ in each episode
+这样就不需要同时维护 action-value network 和 state-value baseline network；一个 state-value critic 就能给 actor 提供 TD advantage。
 
-1. generate $a_t$ following $\pi_\theta(a|s_t)$, observe $r_{t+1}, s_{t+1}$
-2. estimate advantage function by TD error $\delta_t = r_{t+1} + \gamma v(s_{t+1},w_t) - v(s_t,w_t)$
-3. policy update by $\theta_{t+1} = \theta_t + \alpha_\theta \delta_t \nabla_\theta\ln\pi_\theta(a_t|s_t)$, loss is calculated as $-\delta_t \log\pi_\theta(a_t|s_t)$
-4. value update $w_{t+1} = w_t + \alpha_w \delta_t\nabla_w v(s_t, w_t)$, loss is calculated as $(\delta_t)^{2}$
+实现流程：
+
+1. 按 $\pi_\theta(a|s_t)$ 生成 $a_t$，观察 $r_{t+1},s_{t+1}$。
+2. 估计 TD error：
+
+$$
+\delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)
+$$
+
+3. Actor 使用：
+
+$$
+-\delta_t\log\pi_\theta(a_t|s_t)
+$$
+
+4. Critic 使用 $\delta_t^2$ 或等价的 value target loss。
 
 ```python
         # TD Error
         td_target = reward + gamma * next_value
         td_error = td_target - value
+
         # Actor 损失：策略梯度 × 优势
         actor_loss = -log_prob * td_error.detach()
+
         # Critic 损失：让 V(s) 接近 TD Target
         critic_loss = td_error.pow(2)
+
         # 总损失
         loss = actor_loss + critic_loss
 ```
 
-- Off-policy actor-critic
-- Off-policy policy gradient theorem
+### Off-Policy Actor-Critic
+
+Off-policy actor-critic 允许 behavior policy $\beta$ 采样，target policy $\pi_\theta$ 更新。核心修正是 importance ratio：
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{S\sim\rho, A\sim\beta(\cdot|S)}[\frac{\pi_\theta(A|S)}{\beta(A|S)}\nabla_\theta\ln\pi_\theta(A|S)q_\pi(S,A)],
+\nabla_\theta J(\theta) =
+\mathbb{E}_{S\sim\rho, A\sim\beta(\cdot|S)}
+\left[
+\frac{\pi_\theta(A|S)}{\beta(A|S)}
+\nabla_\theta\ln\pi_\theta(A|S)q_\pi(S,A)
+\right]
 $$
 
-where $\rho(s) = \sum_{s'\in\mathcal{S}} d_\beta(s') Pr_\pi(s|s')$ is the state distribution and $Pr_\pi(s|s')$ is the discounted total probability of transitioning.
-
-- algorithm (with baseline and importance sampling)
+其中 off-policy state distribution 为：
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{S\sim\rho, A\sim\beta(\cdot|S)}[\frac{\pi_\theta(A|S)}{\beta(A|S)}\nabla_\theta\ln\pi_\theta(A|S)(q_\pi(S,A) - v_\pi(S))]
+\rho(s)=\sum_{s'\in\mathcal{S}}d_\beta(s')Pr_\pi(s|s')
 $$
 
-- implementation: given a behavior policy $\beta(a|s)$, at each time step $t$ in each episode
+$Pr_\pi(s|s')$ 是 discounted total transition probability。
 
-1. generate $a_t$ following $\beta(a|s_t)$, observe $r_{t+1}, s_{t+1}$
-2. estimate advantage function by TD error $\delta_t = r_{t+1} + \gamma v(s_{t+1},w_t) - v(s_t,w_t)$
-3. policy update by $\theta_{t+1} = \theta_t + \alpha_\theta \frac{\pi_\theta(a_t|s_t)}{\beta(a_t|s_t)} \delta_t \nabla_\theta\ln\pi_\theta(a_t|s_t)$, loss is calculated as $-\frac{\pi_\theta(a_t|s_t)}{\beta(a_t|s_t)}\delta_t \log\pi_\theta(a_t|s_t)$
-4. value update $w_{t+1} = w_t + \alpha_w \frac{\pi_\theta(a_t|s_t)}{\beta(a_t|s_t)} \delta_t\nabla_w v(s_t, w_t)$, loss is calculated as $(\delta_t)^{2}$
+带 baseline 的形式是：
 
-### Modern algorithms
+$$
+\nabla_\theta J(\theta) =
+\mathbb{E}_{S\sim\rho, A\sim\beta(\cdot|S)}
+\left[
+\frac{\pi_\theta(A|S)}{\beta(A|S)}
+\nabla_\theta\ln\pi_\theta(A|S)(q_\pi(S,A)-v_\pi(S))
+\right]
+$$
+
+实现上，给定 behavior policy $\beta(a|s)$：
+
+1. 用 $\beta(a|s_t)$ 采样 $a_t$，观察 $r_{t+1},s_{t+1}$。
+2. 用 $\delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)$ 估计 advantage。
+3. Actor loss 使用 importance ratio：
+
+$$
+-\frac{\pi_\theta(a_t|s_t)}{\beta(a_t|s_t)}\delta_t\log\pi_\theta(a_t|s_t)
+$$
+
+4. Critic 也可以用 importance ratio 加权 TD 更新：
+
+$$
+w_{t+1}=w_t+\alpha_w
+\frac{\pi_\theta(a_t|s_t)}{\beta(a_t|s_t)}
+\delta_t\nabla_w v(s_t,w_t)
+$$
+
+# Modern algorithms
 
 <a id="trpo--ppo-从约束优化到裁剪代理目标"></a>
 
-#### TRPO -> PPO：从约束优化到裁剪代理目标
+## TRPO -> PPO：从约束优化到裁剪代理目标
 
-##### 目标与约束
+### 目标与约束
 
 TRPO 的目标不是“每次都更新得很小”，而是“在策略分布变化可控的区域内尽量更新得大”。它先最大化旧策略分布下的新策略 surrogate objective，再用平均 KL 约束限制新旧策略距离：
 
@@ -640,11 +769,11 @@ D_{KL}\left(\pi_{\theta_{old}}(\cdot|s) \Vert \pi_\theta(\cdot|s)\right)
 \right]\le\delta.
 $$
 
-##### 机制直觉
+### 机制直觉
 
 如果只最大化 ratio-weighted advantage，策略可以把某些动作概率推得过猛，采样分布和更新后分布迅速脱节；KL trust region 把“策略还能相信这批旧 rollout 多久”变成一个约束。
 
-##### 实现代价与 PPO 入口
+### 实现代价与 PPO 入口
 
 TRPO 的工程代价来自解约束优化：线性化 surrogate objective，二阶近似 KL，使用 Fisher-vector product 和 conjugate gradient 近似自然梯度方向，再通过 line search 确认 surrogate 变好且 KL 未越界。推导见 [TRPO trust-region 二阶近似](#trpo-trust-region-二阶近似)。
 
@@ -667,16 +796,16 @@ PPO 的 clipped surrogate 是 TRPO 思想的一阶工程替代：不再显式求
 
 <a id="proximal-policy-optimization-ppo"></a>
 
-#### Proximal Policy Optimization (PPO)
+## Proximal Policy Optimization (PPO)
 
-##### 目标函数：非 LLM 简化版本
+### 目标函数：非 LLM 简化版本
 
 $$
 J_{PPO}(\theta) = \mathbb{E}[\min(r_t(\theta) A_t, clip(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t)] \\
 r_t(\theta) = \frac{\pi_{\theta}(a|s)}{\pi_{old}(a|s)} = \exp(\log\pi_{\theta}(a|s) - \log\pi_{old}(a|s))
 $$
 
-##### 目标函数：LLM token-level 版本
+### 目标函数：LLM token-level 版本
 
 $$
 J_{PPO}(\theta) = \mathbb{E}_{q\sim \mathcal{D},o_i\sim \pi_{old}(\cdot|q)}[\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]
@@ -684,7 +813,7 @@ $$
 
 其中 $o$ 代表模型生成的一条序列， $o_i$ 代表第 $i$ 条序列， $o_{i,t}$ 代表第 $i$ 条序列的第 $t$ 个 token。先对一条序列的每个 token 计算优势并累加，再除以序列长度进行归一化，这是防止长序列优势累加过大，在优化时过度重视长序列。
 
-##### Token 级对象
+### Token 级对象
 
 Token 级优势和 ratio 分别是：
 
@@ -692,7 +821,7 @@ $$
 \hat A_{i,t} \quad\text{and}\quad r_{i,t} = \frac{\pi_\theta(o_{i,t}|q,o_{i,\lt t})} {\pi_{old}(o_{i,t}|q,o_{i,\lt t})}.
 $$
 
-$\hat A_{i,t}$ 由奖励模型与批判模型共同计算，衡量第 $t$ 个 token 对最终回报的贡献差异； $r_{i,t}>1$ 表示新策略相对旧策略更倾向于输出该 token，反之则说明新策略正在降低该 token 的概率。
+$\hat A_{i,t}$ 由奖励模型与批判模型共同计算，衡量第 $t$ 个 token 对最终回报的贡献差异； $r_{i,t}\gt1$ 表示新策略相对旧策略更倾向于输出该 token，反之则说明新策略正在降低该 token 的概率。
 
 ```python
     # old_logp 是 rollout 采样时旧策略给动作/token 的 log probability。
@@ -711,27 +840,27 @@ $\hat A_{i,t}$ 由奖励模型与批判模型共同计算，衡量第 $t$ 个 to
     policy_loss = (policy_loss * action_or_token_mask).sum() / action_or_token_mask.sum()
 ```
 
-##### Clip 与 Token-Masking
+### Clip 与 Token-Masking
 
 动机：将 current policy 中 prob 偏离 old policy 太远的 token mask 掉，确保每次更新不会“迈太大的步子”，从而避免训练崩溃。
 
 为什么是单边裁剪机制？
 
-- 场景一：优势 $A > 0$。当更新方向（即奖励方向）与优势方向相同，且超过 clip 上界时，认为本次更新方向正确但过于激烈， $min$ 选择了 clip 项，其对 $\theta$ 来说是一个常数，等同于直接去掉梯度不参与本次训练更新；当方向相反，且超过 clip 下界时，认为此时更新方向错误，需要大的惩罚修正更新方向， $min$ 使得忽略 clip，使用错误更新方向带来的大的惩罚梯度参与本次训练更新；所以 $A > 0$ 时单边裁剪的对象是 "Higher Area"。
+- 场景一：优势 $A \gt 0$。当更新方向（即奖励方向）与优势方向相同，且超过 clip 上界时，认为本次更新方向正确但过于激烈， $min$ 选择了 clip 项，其对 $\theta$ 来说是一个常数，等同于直接去掉梯度不参与本次训练更新；当方向相反，且超过 clip 下界时，认为此时更新方向错误，需要大的惩罚修正更新方向， $min$ 使得忽略 clip，使用错误更新方向带来的大的惩罚梯度参与本次训练更新；所以 $A \gt 0$ 时单边裁剪的对象是 "Higher Area"。
 - 场景二：优势 $A \lt 0$。当更新方向（即奖励方向）与优势方向相同，且超过 clip 下界时，认为本次更新方向正确但过于激烈， $min$ 选择了 clip 项，其对 $\theta$ 来说是一个常数，等同于直接去掉梯度不参与本次训练更新；当方向相反，且超过 clip 上界时，认为此时更新方向错误，需要大的惩罚修正更新方向， $min$ 使得忽略 clip，使用错误更新方向带来的大的惩罚梯度参与本次训练更新；所以 $A \lt 0$ 时单边裁剪的对象是 "Lower Area"。
 
 actor objective 为什么要有 $\min$? 在更新方向（即奖励方向）与优势方向不同时，忽略 clip 的限制使用更大的惩罚让目标回到正轨：
 
-1. $A_t > 0, r_t \lt 1 - \epsilon$, $J(\theta) = r_t A_t$, not $(1 - \epsilon)A_t$ by clip
-2. $A_t \lt 0, r_t > 1 + \epsilon$, $J(\theta) = r_t A_t$, not $(1 + \epsilon)A_t$ by clip
+1. $A_t \gt 0, r_t \lt 1 - \epsilon$, $J(\theta) = r_t A_t$, not $(1 - \epsilon)A_t$ by clip
+2. $A_t \lt 0, r_t \gt 1 + \epsilon$, $J(\theta) = r_t A_t$, not $(1 + \epsilon)A_t$ by clip
 
-##### Dual Clip
+### Dual Clip
 
 当更新方向与优势方向相反时，在 $A \lt 0$ 场景下，当 $\pi_{old}$ 很小而 $\pi_\theta$ 很大时，导致 $\frac{\pi_\theta}{\pi_{old}}$ 很大，巨大的权重会主导整个估计，导致方差爆炸，同样会影响训练的稳定性。直接把这部分 token 也 mask 掉不合理，所以具体实现时对这部分规定 loss 上限。
 
 参考：https://zhuanlan.zhihu.com/p/1950988412405417622
 
-##### GAE 与 advantage
+### GAE 与 advantage
 
 GAE 本质上是 one-step TD error 和 MC 之间的平滑插值， $\lambda$ 平衡偏差与方差：
 
@@ -739,7 +868,7 @@ GAE 本质上是 one-step TD error 和 MC 之间的平滑插值， $\lambda$ 平
 - $\lambda = 1$, $A_t = \sum_{k=0}^{\infty} \gamma^{k} \delta_{t+k} = G_t - v(s_t)$, this can be proved by sum over $\delta_{t}$ expansion，低偏差、高方差
 - $0\lt\lambda\lt1$, as $\lambda$ increase, 指数衰减的权重 $(\gamma \lambda)^{k}$ 让远处的 TD Error 贡献逐渐减小
 
-##### 多轮更新与重要性采样
+### 多轮更新与重要性采样
 
 动机：消除采样策略(old policy)和当前策略的分布差异，保证回报期望计算的准确性，以使模型可以在同一份采样数据上进行多轮优化更新，提高采样数据的使用效率。
 
@@ -748,7 +877,7 @@ GAE 本质上是 one-step TD error 和 MC 之间的平滑插值， $\lambda$ 平
 - 计算 log_prob：用当前 policy 和 ref policy 计算 log prob，然后计算权重 r。
 - 多轮 actor 更新：每一轮更新后 policy 会变，但数据依然是一开始采样的。新策略在学旧策略生成的数据，产生 off-policy 成分，因此需要用重要性采样比值 $r_t(\theta)=\pi_\theta/\pi_{old}$ 做校正，并用 clip 限制校正后方差和策略漂移。
 
-##### 非 LLM PPO 实现流程
+### 非 LLM PPO 实现流程
 
 for each episode, implement below:
 
@@ -773,21 +902,21 @@ for each episode, implement below:
 
 <a id="grpo-from-deepseekmath"></a>
 
-#### GRPO (from DeepSeekMath)
+## GRPO (from DeepSeekMath)
 
-##### 目标与对象定义
+### 目标与对象定义
 
 - 对于模型 $\pi_\theta$ 给定一个问题 $q$ 采样多个回答 $\lbrace o_i \rbrace_{i=1}^{G}$， $G$ 是 group 数量，每个回答有不同的长度 $|o_i|$
 - $\pi_\theta(o_{i,t}|q, o_{i,\lt t})$ 是在 $q$ 的采样解答 $o_{i,t}$ 解码的第 $t$ 个词元的策略概率
 - KL 约束 $\pi_\theta$ 和 $\pi_{ref}$ 分布差异，使用 k3 估计（无偏 & 方差小）
 
-##### K3 estimator
+### K3 estimator
 
 $$
 D_{KL}[\pi_\theta \Vert \pi_{ref}] = \frac{\pi_{ref}(o_{i,t}|q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t}|q,o_{i,\lt t})} - \log \frac{\pi_{ref}(o_{i,t}|q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t}|q,o_{i,\lt t})} - 1
 $$
 
-##### Group relative advantage
+### Group relative advantage
 
 相较于 PPO 去掉了价值模型，将 Advantage 定义为相对于组中其他响应的输出奖励。 $\hat{A}_{i,t}$ 是组的相对优势，一条采样回答中的每个 token 的优势都是一样的（token level）。
 
@@ -799,21 +928,21 @@ $$
 \mathcal{L}_{GRPO}(\theta) = \mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot|q)}[\frac{1}{G} \sum_{i=1}^{G} \frac{1}{|o_i|} \sum_{t=1}^{|o_i|}[\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]]
 $$
 
-##### 与 PPO 的差异
+### 与 PPO 的差异
 
 差异点：PPO 需要价值网络计算 Advantage；GRPO 去掉了价值模型，将 Advantage 定义为相对于组中其他响应的输出奖励。
 
 共同的问题：PPO/GRPO 损失函数中的不当裁剪操作对性能有负面影响，不能有效促进 CoT 推理行为出现。具体来说，与反思行为相关的 token 通常是推理路径中的“分叉点”，在 Base 模型中出现频率低，且被赋予较低的概率。这些 token 往往具备较高的重要性采样权重 $r$，因此在第一次 on-policy 更新后就会被裁剪掉，无法参与后续的 off-policy 梯度更新。然而，这些低概率 token 往往对于稳定熵以及促进可扩展的强化学习至关重要（之后的 DAPO 尝试通过提高裁剪上界来缓解，CISPO 尝试设计明确避免丢弃 token，对较大更新的 token 通过内在机制将熵控制在合理范围）。
 
-##### Loss 现象分析
+### Loss 现象分析
 
 训练 GRPO 的 Loss 为什么会有负值并且会上升？
 
-- 观察：当 $\min(,) > KL > 0$ 时，损失为负数，由于 ratio 恒为正，所以要求优势 $\hat{A}_{i,t} > 0$
-- 分析：当组 reward 的方差较大时，便容易出现较大的 $\hat{A}_{i,t}$，或者是 ratio 有较大的变化值时，都可能使得 $\min(,) > KL > 0$
+- 观察：当 $\min(\cdot) \gt KL \gt 0$ 时，损失为负数，由于 ratio 恒为正，所以要求优势 $\hat{A}_{i,t} \gt 0$
+- 分析：当组 reward 的方差较大时，便容易出现较大的 $\hat{A}_{i,t}$，或者是 ratio 有较大的变化值时，都可能使得 $\min(\cdot) \gt KL \gt 0$
 - 回答：GRPO损失不保证为正数（如组 reward 的方差较大时）。训练过程优化策略远离ref，因为KL约束会产生较大的损失变化导致大梯度，Loss会上升
 
-##### 实现流程
+### 实现流程
 
 1. 对每个 prompt 在线采样多个回答，得到一组样本 (batch) : $x_j \rightarrow \lbrace y_{j,1}, \dots, y_{j,G}\rbrace$, where $x_j$ is $j$-th prompt, , $G$ is group size, $y_{j,i}$ is $i$-th response under $j$-th prompt，
 2. 计算对应奖励 $r_{j,i} = R(x_j, y_{j,i})$（对于 GSM8K 数据集，每道题都有明确的数值答案，不需要训练任何 RM，直接用规则判断。RLVR 核心思想：可验证奖励）
@@ -884,7 +1013,7 @@ $$
         grpo_loss = -(per_response_objective - beta_kl * per_response_kl).mean()
 ```
 
-##### 实际问题
+### 实际问题
 
 - Response-Level 的 Advantage：对同一提示（prompt）采样多个响应/回答（response），再计算该组响应内的标准化得分，并将其作为该响应中所有 token 的统一 Advantage。也就是说，GRPO 中同一响应内的所有 token 共享相同的 Advantage，不存在区分性
 - loss 计算方式是：先在每个样本内按 Token 对损失进行平均，然后在样本之间聚合损失，即每个样本在最终损失计算中被分配相同的权重（每个样本对 Loss 等权），这会导致较长回复中的 Token 可能对总体损失的贡献较低（影响被长样本稀释），所以就可能导致高质量的长样本学习的较差，而低质量的长文本又无法得到惩罚
@@ -894,9 +1023,9 @@ $$
 
 <a id="dapo-seed-2025"></a>
 
-#### DAPO (Seed, 2025)
+## DAPO (Seed, 2025)
 
-##### 目标函数
+### 目标函数
 
 $$
 \mathcal{L}_{DAPO}(\theta) = -\mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot|q)}
@@ -929,11 +1058,11 @@ $$
 0 \lt |\lbrace o_i \mid \text{equivalent}(a, o_i)\rbrace| \lt G
 $$
 
-##### 关键改动
+### 关键改动
 
 DAPO 的优化角度可以拆成四个分支：Clip-Higher、动态采样、token-level policy gradient loss、Overlong Reward Shaping。
 
-##### Clip-Higher
+### Clip-Higher
 
 动机：使用 PPO 或 GRPO 训练时观察到的熵坍缩现象，就是 Policy 的熵迅速下降，导致某些组生成的结果几乎相同，限制了探索。分析：原有的上限截断阈值在一定程度上限制了低概率（但有潜力） token 的概率提升，从而可能抑制模型生成的多样性
 
@@ -941,19 +1070,19 @@ DAPO 的优化角度可以拆成四个分支：Clip-Higher、动态采样、toke
 - 方案：仅对正样本，增大 clip 的上限（clip higher = 0.28），而负样本的 clip 区间保持不变，为低概率 token 的概率提升释放了更多空间
 - 为什么主要放宽正样本上界：DAPO 想保护“低概率但高奖励”的探索 token，让它们能继续上升；负样本对应的是降低概率，继续放宽下界会加强惩罚和分布漂移，对保持熵与稳定性未必有同样收益。
 
-##### Dynamic Sampling
+### Dynamic Sampling
 
 动机：当某些提示词 Acc 等于1时的梯度消失问题。因为 Acc 为1时，GRPO一组输出的 Reward 都是1，Advantage等于0，此时 Policy 没有优化，因此降低了样本效率。根据经验，精度等于1的样本数量会在训练过程中持续增加
 
 - 方案：使用过采样并过滤掉准确度等于1和0的提示词，目标中的 equivalent 的意思是样本是等效的（过滤掉无效的）。具体做法是：在训练前持续采样，直到批次被准确率既不为 0 也不为 1 的样本完全填充
 
-##### Token-Level Policy Gradient Loss
+### Token-Level Policy Gradient Loss
 
 动机：GRPO loss 计算方式是：先在每个样本内按 Token 对损失进行平均，然后在样本之间聚合损失，即每个样本在最终损失计算中被分配相同的权重（每个样本对 Loss 等权），这会导致较长回复中的 Token 可能对总体损失的贡献较低（影响被长样本稀释），所以就可能导致高质量的长样本学习的较差，而低质量的长文本又无法得到惩罚
 
 - 方案：DAPO loss 计算方式是：直接对所有 token 级别做均值计算，使得较长的序列（相比短的）对整体Loss的影响更大。此外，从单个Token的角度来看，如果某种特定的生成模式能够导致奖励的增加或减少，那么无论该模式出现在多长的回复中，它都会被同等地促进或抑制
 
-##### Overlong Reward Shaping
+### Overlong Reward Shaping
 
 动机：GRPO 训练中常见的一个工程问题：回答长度失控。模型可能学会"写得越多越好"（因为更长的回答更容易包含正确推理），导致生成 2000+ token 的冗长回答。GRPO 的原始做法是设定最大长度，超过就截断并给惩罚。但截断是硬边界，回答 499 token 没事，501 token 就被惩罚，梯度信号不连续。截断样本的不当奖励塑造（一般提取不到答案，所以Reward为-1）会引入奖励噪声，并严重扰乱训练过程。因为一个合理的推理过程可能仅因长度过长而受到惩罚，使模型对其推理过程的有效性产生困惑
 
@@ -965,13 +1094,13 @@ DAPO 的优化角度可以拆成四个分支：Clip-Higher、动态采样、toke
 
 <a id="cispo-minimax"></a>
 
-#### CISPO (Minimax)
+## CISPO (Minimax)
 
-##### 优化角度
+### 优化角度
 
 CISPO (Clipped IS-weight Policy Optimization) 不再像 PPO/GRPO 那样通过 `min` 把某些 token update 的梯度变成 0，而是裁剪 importance sampling weight，并对该权重做 stop-gradient。这样所有 token 的 $\log \pi_\theta$ 梯度仍然参与训练，更新强度由 clipped IS weight 控制。
 
-##### 从 IS REINFORCE 到 CISPO 目标
+### 从 IS REINFORCE 到 CISPO 目标
 
 从带 IS 修正的 REINFORCE 看，off-policy minibatch 更新可以写成：
 
@@ -1010,7 +1139,7 @@ $$
 \hat{r}_{i,t}(\theta)=clip(r_{i,t}(\theta),1-\epsilon_{low}^{IS},1+\epsilon_{high}^{IS}).
 $$
 
-##### 代码实现
+### 代码实现
 
 ```python
     # response_mask 只统计回答 token；adv_tokens 通常来自 group relative advantage。
@@ -1025,19 +1154,19 @@ $$
     cispo_loss = -(token_objective * response_mask).sum() / response_mask.sum().clamp_min(1)
 ```
 
-##### 和 PPO/GRPO 的关键差异
+### 和 PPO/GRPO 的关键差异
 
 1. PPO/GRPO 的 `min(unclipped, clipped)` 是 advantage-sign-dependent 的单边保守目标；当 token ratio 在“有利方向”越界时，对应 token 可能不再贡献梯度。
 2. CISPO 的 $\hat r$ 被 `detach`，所以 $\nabla_\theta J$ 主要来自 $\nabla_\theta\log\pi_\theta$；越界 token 仍参与训练，只是梯度权重被压到边界。
 3. 如果不裁剪 IS weight，CISPO 退化为带 stop-gradient IS 权重的标准 policy gradient；裁剪会引入轻微偏差，但换来低方差和长 response 中更高的 token 利用率。
 
-##### 实际操作问题
+### 实际操作问题
 
 - **上界更关键。** MiniMax-M1 报告提到实验中主要调 $\epsilon^{IS}_{high}$，低界可设得较宽；因为他们更关心高 ratio token 的方差和爆炸风险。
 - **没有显式 KL penalty。** CISPO 和 DAPO/GSPO 一样，不把 reference KL 当主约束，稳定性更多依赖动态采样、长度惩罚、IS 权重范围和优化器设置。
 - **可能保留过多错误方向梯度。** 当某些 token 已经在坏方向上显著偏离旧策略时，CISPO 仍保留其梯度，只是缩小权重；这比 PPO 更高效，但也要求更谨慎地监控 entropy、clip fraction、梯度范数和重复输出。
 
-##### 统一 mask 视角
+### 统一 mask 视角
 
 MiniMax-M1 还给出一个带 token-wise mask 的统一写法，用来表示“何时完全丢掉 token 梯度”。若 $M_{i,t}=1$ 恒成立，就是纯 CISPO；若 $M_{i,t}$ 模拟 PPO 的单边截断，就可以回到更保守的 token update 过滤。
 
@@ -1054,7 +1183,7 @@ $$
 $$
 M_{i,t}=
 \begin{cases}
-0,& \hat A_{i,t}>0\ \text{and}\ r_{i,t}(\theta)>1+\epsilon_{high}\\
+0,& \hat A_{i,t}\gt0\ \text{and}\ r_{i,t}(\theta)\gt1+\epsilon_{high}\\
 0,& \hat A_{i,t}\lt0\ \text{and}\ r_{i,t}(\theta)\lt1-\epsilon_{low}\\
 1,& \text{otherwise}
 \end{cases}
@@ -1062,13 +1191,13 @@ $$
 
 <a id="gspo-qwen-2025"></a>
 
-#### GSPO (Qwen, 2025)
+## GSPO (Qwen, 2025)
 
-##### 优化角度
+### 优化角度
 
 GSPO (Group Sequence Policy Optimization) 认为 GRPO 的 token-level importance ratio 用错了修正粒度：奖励是整条 response 的 sequence-level reward，但 GRPO 在每个 token 上分别做 off-policy correction。GSPO 把 ratio、clip、rewarding、optimization 都提升到 sequence level，让修正粒度和奖励粒度对齐。
 
-##### 目标函数
+### 目标函数
 
 对同一个 prompt $x$ 采样 $G$ 条 response $\lbrace y_i \rbrace_{i=1}^{G}$，先做组内优势：
 
@@ -1092,7 +1221,7 @@ J_{GSPO}(\theta)=\mathbb{E}\left[
 \right]
 $$
 
-##### 长度归一化与代码实现
+### 长度归一化与代码实现
 
 为什么要做长度归一化：完整 sequence likelihood 是所有 token 概率的乘积，长度越长越容易产生极端 ratio；取 $1/|o_i|$ 的几何平均后，不同长度 response 可以共享同一数量级的 clip range。
 
@@ -1113,7 +1242,7 @@ $$
     gspo_loss = -seq_objective.mean()
 ```
 
-##### 梯度视角
+### 梯度视角
 
 忽略 clip 时，GSPO 梯度近似为：
 
@@ -1141,7 +1270,7 @@ $$
 
 关键区别：GRPO 每个 token 被自己的 ratio 加权，长 response 中少数极端 token 会持续放大梯度噪声；GSPO 用整条 response 的同一个 $s_i$ 加权所有 token，降低 token-level ratio 方差。
 
-##### GSPO-token
+### GSPO-token
 
 论文还给出 token-level variant，用 sequence-level $s_i$ 的数值控制 clip，但通过 stop-gradient 构造 token-level 可反传项：
 
@@ -1168,7 +1297,7 @@ $$
     gspo_token_loss = -(token_obj * response_mask).sum() / response_mask.sum().clamp_min(1)
 ```
 
-##### 实际操作问题
+### 实际操作问题
 
 - **MoE routing mismatch。** GSPO 论文指出 token-level ratio 对 MoE expert routing 变化很敏感；同一 response 在更新后可能激活不同 expert，导致 token ratio 波动。GSPO 只依赖 sequence likelihood，对单个 token likelihood 的敏感度更低，因此可以减少对 routing replay 的依赖。
 - **推理/训练精度差异。** 如果 rollout 由 vLLM/SGLang 等推理引擎生成，训练引擎重新算 token logprob 可能和推理时不完全一致。GSPO 使用 sequence-level likelihood，对这种细粒度差异更宽容。
@@ -1176,22 +1305,22 @@ $$
 
 <a id="reward-model-bradley-terry-偏好建模"></a>
 
-#### Reward Model：Bradley-Terry 偏好建模
+## Reward Model：Bradley-Terry 偏好建模
 
-##### 目标和公式
+### 目标和公式
 
 目的：预测两个竞争者结果的概率模型，常用于处理成对比较的数据。 $p_i$ 是正实数分数，可以写成指数分数函数 $p_i=e^{\beta_i}$。
 
 $$
 \begin{aligned}
-p(i>j) &= \frac{p_i}{p_i + p_j} \\
+p(i\gt j) &= \frac{p_i}{p_i + p_j} \\
 &= \frac{e^{\beta_i}}{e^{\beta_i} + e^{\beta_j}} \\
 &= \frac{1}{1 + e^{-(\beta_i - \beta_j)}} \\
 &= \sigma(\beta_i - \beta_j)
 \end{aligned}
 $$
 
-##### MLE 目标
+### MLE 目标
 
 $$
 \mathrm{argmin}_{\beta} \sum_{i,j} -\log\sigma(\beta_i-\beta_j)
@@ -1199,7 +1328,7 @@ $$
 
 该目标鼓励 $\beta_i\gg\beta_j$。
 
-##### 训练数据和 BT likelihood
+### 训练数据和 BT likelihood
 
 给定 prompt $x$ 根据人类偏好标注得到回答 $y_1 \succ y_2$，构建偏好数据集 $\mathcal{D} = \lbrace x^{(i)}, y_w^{(i)}, y_l^{(i)}\rbrace_{i=1}^{N}$，reward 模型需要预测出分数 $r^{\ast}(y, x)$。通过 BT 模型建模人类偏好分布：
 
@@ -1223,13 +1352,13 @@ $$
         reward_model_loss = -torch.nn.functional.logsigmoid(reward_margin).mean()
 ```
 
-##### 奖励颗粒度
+### 奖励颗粒度
 
 - sequence-level: 整个回答一个分数 (PPO, GRPO)
 - token-level: 每个 token 独立分数，标注成本高，信用分配（解耦）难
 - step-level: 按推理步骤分段，需要步骤分割器
 
-##### 实际操作注意
+### 实际操作注意
 
 - 数据切分：训练集和验证集共享同一个 prompt，甚至共享部分回答。这样得到的 eval accuracy 会偏乐观，更稳妥的做法是按 prompt 切分
 - RM 分数尺度：RM 训练只关心分数差，不关心绝对尺度，但 PPO 阶段感受到的奖励尺度完全不同，PPO之前需要校准，常见做法是在固定校准集上做标准化
@@ -1237,15 +1366,15 @@ $$
 
 <a id="reinforcement-learning-from-human-feedback-rlhf"></a>
 
-#### Reinforcement Learning from Human Feedback (RLHF)
+## Reinforcement Learning from Human Feedback (RLHF)
 
-##### SFT 目标
+### SFT 目标
 
 $$
 \mathcal{L}_{SFT} = -\mathbb{E}_{(x,y)\sim\mathcal{D}}[\log\pi_\theta(y|x)] \approx -\sum_{t=1}^{T} \log\pi_\theta(y_t|x,y_{\lt t})
 $$
 
-##### RLHF 目标
+### RLHF 目标
 
 $$
 \mathcal{J}_{RLHF} = \mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(\cdot|x)}[r_\phi(x,y)] - \beta D_{KL}(\pi_\theta(\cdot|x) \Vert \pi_{ref}(\cdot|x))
@@ -1253,7 +1382,7 @@ $$
 
 解释：让当前模型自己生成回答，用 RM 打分，再用 PPO 提高高分回答的概率，追求偏好奖励，同时别偏离 SFT 太远，用裁剪、优势估计和 KL 约束（k2 estimation）来稳定更新。
 
-##### LLM-RLHF 的 token-level reward
+### LLM-RLHF 的 token-level reward
 
 Reward Model 往往只在完整回答 $y$ 结束后给一个分数 $r(x,y)$，为了让 PPO 能在 token 级别更新，工程上会把奖励拆成两部分：1. 每个 token 都有 KL 惩罚，防止偏离 reference; 2. 最后一个 token 或 EOS 位置加上 RM 的整段奖励。
 
@@ -1264,16 +1393,16 @@ r_t^{token} &= -\beta(\log\pi_\theta(y_t|s_t) - \log\pi_{ref}(y_t|s_t)), \quad t
 \end{aligned}
 $$
 
-##### 梯度颗粒度
+### 梯度颗粒度
 
 - token-level: 每个 token 有独立的梯度信号，虽然奖励仍然集中在末尾，但通过 Critic 估计每个位置的 value，计算出每个 token 独立的 advantage
 - sequence-level: 整条回答的所有 token 共用一个梯度信号，但其中真正决定质量的往往只有几个。如果所有 token 被平均更新，梯度信号就被大量无关 token 稀释了，模型需要把学习精力集中在真正重要的 token 上
 
 <a id="direct-preference-optimization-dpo"></a>
 
-#### Direct Preference Optimization (DPO)
+## Direct Preference Optimization (DPO)
 
-##### 目标函数
+### 目标函数
 
 $$
 \mathcal{L}_{DPO}(\pi_\theta;\pi_{ref}) = -\mathbb{E}_{x,y_w,y_l\sim \mathcal{D}}[\log \sigma(\beta\log\frac{\pi_\theta(y_w|x)}{\pi_{ref}(y_w|x)} - \beta\log\frac{\pi_\theta(y_l|x)}{\pi_{ref}(y_l|x)})]
@@ -1295,7 +1424,7 @@ $$
     dpo_loss = -torch.nn.functional.logsigmoid(logits).mean()
 ```
 
-##### 目标推导
+### 目标推导
 
 从 RLHF 的目标开始：
 
@@ -1310,7 +1439,7 @@ $$
 \end{aligned}
 $$
 
-##### 推导动机
+### 推导动机
 
 找到一个配分函数 $Z(x) = \sum_y \pi_{ref}(y|x)e^{\frac{1}{\beta}r(x,y)}$ 作为一个有效的概率分布的归一化系数：
 
@@ -1329,7 +1458,7 @@ p^{\ast}(y_1 \succ y_2|x) &= \frac{e^{r^{\ast}(x, y_1)}}{e^{r^{\ast}(x, y_1)} + 
 \end{aligned}
 $$
 
-##### 为什么标准 RLHF(PPO) 更鲁棒？
+### 为什么标准 RLHF(PPO) 更鲁棒？
 
 - DPO的训练目标会导致过拟合，因为 rejected token 策略 $\pi_\theta(y_l|x)$ 会快速收敛到 0，导致 DPO sigmoid 概率不断接近 1，损失一直降低，但是没有对齐偏好。解决方案可以是 IPO，它把偏好概率拟合到一个固定 margin：
 
@@ -1406,7 +1535,7 @@ for prompt in eval_prompts:
 
 # Mathematical tools behind algorithms
 
-### Bellman expectation equation 推导
+## Bellman expectation equation 推导
 
 状态价值从定义出发：
 
@@ -1466,7 +1595,7 @@ $$
 v_\pi=(I-\gamma P_\pi)^{-1}r_\pi.
 $$
 
-### Bellman optimality contraction
+## Bellman optimality contraction
 
 Bellman optimality operator 定义为
 
@@ -1505,7 +1634,7 @@ $$
 
 value iteration $v_{k+1}=Tv_k$ 会收敛到这个不动点。
 
-### 策略梯度定理证明
+## 策略梯度定理证明
 
 最常用的证明从整条轨迹 $\tau=(s_0,a_0,r_1,\dots,s_T)$ 的似然比开始。有限时域目标写作
 
@@ -1592,7 +1721,7 @@ $$
 
 trajectory 形式更适合解释 REINFORCE/PPO 代码；discounted occupancy 形式更适合和 Bellman、actor-critic 的状态分布对齐。不同资料省略 $\frac{1}{1-\gamma}$ 时，通常是把常数吸收到学习率或采用未归一化 occupancy measure。
 
-### TRPO trust-region 二阶近似
+## TRPO trust-region 二阶近似
 
 TRPO 的约束优化写成：
 
@@ -1653,7 +1782,7 @@ $$
 - 目的：model preference 人类偏好模型。它是一种用于预测两个竞争者（如个人或团队）结果的概率模型，常用于处理成对比较的数据，通常用来估计和比较个体或项目的相对能力
 
 $$
-Pr(i>j) = \frac{p_i}{p_i + p_j} = \frac{e^{\beta_i}}{e^{\beta_i} + e^{\beta_j}} = \frac{1}{1 + e^{-(\beta_i - \beta_j)}} = \sigma(\beta_i - \beta_j),
+Pr(i\gt j) = \frac{p_i}{p_i + p_j} = \frac{e^{\beta_i}}{e^{\beta_i} + e^{\beta_j}} = \frac{1}{1 + e^{-(\beta_i - \beta_j)}} = \sigma(\beta_i - \beta_j),
 $$
 
 $p_i$ 是 $i$ 的正实数分数， $p_i = e^{\beta_i}$ 是对应的指数分数函数

@@ -31,7 +31,7 @@
         "Led commercialization of 24-hour continuous non-invasive blood pressure monitoring for the HONOR Watch 5 Pro.",
         "Led commercialization of sudden cardiac arrest screening based on heart-rate deceleration capacity for the HONOR Watch 5 Ultra.",
         "Worked on physiological signal modeling, multimodal representation learning, calibration, domain adaptation, and health-feature algorithm pipelines.",
-        "Explored medical large models, RAG, fine-tuning, and generative modeling techniques for healthcare-oriented vertical applications."
+        "Explored medical large models, fine-tuning, and generative modeling techniques for healthcare-oriented vertical applications."
       ]
     }
   ],
@@ -150,7 +150,7 @@
       "name": "Medical Large Models",
       "level": "Working knowledge",
       "icon": "fa-solid fa-notes-medical",
-      "keywords": ["RAG", "Fine-tuning", "Medical-domain adaptation", "Knowledge-grounded generation", "Healthcare workflow modeling"]
+      "keywords": ["Fine-tuning", "Medical-domain adaptation", "Healthcare evaluation", "Knowledge-grounded modeling", "Healthcare workflow modeling"]
     },
     {
       "name": "AI Systems",

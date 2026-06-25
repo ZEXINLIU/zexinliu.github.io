@@ -84,7 +84,7 @@
         - Calibration and domain adaptation
     - title: Large models and generative AI for healthcare
       items:
-        - Medical-domain RAG and fine-tuning
+        - Medical-domain model adaptation and fine-tuning
         - Flow matching and diffusion models
         - Multimodal contrastive learning
         - Large-model inference systems

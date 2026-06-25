@@ -1,8 +1,8 @@
 ---
 layout: post
-title: "Modern Reinforcement Learning Objectives: Bellman Targets, PPO/TRPO, GRPO, DAPO, CISPO, and GSPO"
+title: "LLM RL: from Bellman Target, PPO Clip to Token/Sequence Ratio and Training-Inference Mismatch"
 date: 2026-06-25 00:00:00
-description: A technical map of Bellman targets, policy gradients, trust-region optimization, PPO clipping, RLHF, DPO, and token- versus sequence-level objectives in modern LLM reinforcement learning.
+description: A structured reinforcement learning tutorial from Bellman targets and policy gradients to PPO, GRPO, DAPO, CISPO, GSPO, DPO, and training-inference mismatch.
 tags: reinforcement-learning policy-gradient llm-rl ppo rlhf
 categories: technical-notes
 featured: true
@@ -881,7 +881,7 @@ GAE 本质上是 one-step TD error 和 MC 之间的平滑插值， $\lambda$ 平
 
 for each episode, implement below:
 
-1. collect a rollout $\lbrace s_t, a_t, \pi_\theta(a_t|s_t), s_{t+1}\rbrace$ for a given number of steps,  行为策略 $\pi_\theta$ update after each episode
+1. collect a rollout $\lbrace s_t, a_t, \pi_\theta(a_t|s_t), s_{t+1}\rbrace$ for a given number of steps, 行为策略 $\pi_\theta$ update after each episode
 2. compute Generalized Advantage Estimation (GAE) and return
 
 - TD error $\delta_t = r_t + \gamma v(s_{t+1}) - v(s_t)$

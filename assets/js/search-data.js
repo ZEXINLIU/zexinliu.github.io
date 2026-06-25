@@ -25,14 +25,14 @@ ninja.data = [{
           },
         },{id: "nav-projects",
           title: "projects",
-          description: "Three core projects connecting mathematical modeling, medical AI, and product deployment.",
+          description: "Four projects connecting safe reinforcement learning, generative personalization, contrastive physiological modeling, scientific computing, and biomedical uncertainty quantification.",
           section: "Navigation",
           handler: () => {
             window.location.href = "/projects/";
           },
         },{id: "nav-cv",
           title: "cv",
-          description: "Mathematical modeling, medical AI, wearable health algorithms, selected publications, and deployed product work.",
+          description: "Safe RL, generative personalization, contrastive physiological modeling, scientific computing, uncertainty quantification, wearable health algorithms, selected publications, and deployed product work.",
           section: "Navigation",
           handler: () => {
             window.location.href = "/cv/";
@@ -51,11 +51,11 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/books/";
               },
-            },{id: "post-llm-reinforcement-learning-bellman-targets-ppo-clipping-token-sequence-ratios-and-training-inference-mismatch",
+            },{id: "post-modern-reinforcement-learning-objectives-bellman-targets-ppo-trpo-grpo-dapo-cispo-and-gspo",
         
-          title: "LLM Reinforcement Learning: Bellman Targets, PPO Clipping, Token/Sequence Ratios, and Training-Inference Mismatch",
+          title: "Modern Reinforcement Learning Objectives: Bellman Targets, PPO/TRPO, GRPO, DAPO, CISPO, and GSPO",
         
-        description: "A technical map of Bellman targets, value learning, policy gradients, PPO/TRPO, RLHF, DPO, and token- versus sequence-level objectives in modern LLM reinforcement learning.",
+        description: "A technical map of Bellman targets, policy gradients, trust-region optimization, PPO clipping, RLHF, DPO, and token- versus sequence-level objectives in modern LLM reinforcement learning.",
         section: "Posts",
         handler: () => {
           
@@ -537,21 +537,26 @@ ninja.data = [{
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_4/";
-            },},{id: "projects-continuous-non-invasive-blood-pressure-monitoring",
-          title: 'Continuous Non-Invasive Blood Pressure Monitoring',
-          description: "24-hour wearable BP monitoring from physiological signals, calibration, and population-level robustness.",
+            },},{id: "projects-24h-cuffless-blood-pressure-monitoring",
+          title: '24H Cuffless Blood Pressure Monitoring',
+          description: "Wearable PPG blood pressure monitoring with personalization, calibration, and product-level robustness.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/1_project/";
-            },},{id: "projects-heart-rate-deceleration-capacity-screening",
-          title: 'Heart-Rate Deceleration Capacity Screening',
-          description: "Wearable heart-risk screening built on deceleration capacity, ECG/PPG representation learning, and health-study deployment.",
+            },},{id: "projects-deceleration-capacity-screening-from-wearable-signals",
+          title: 'Deceleration Capacity Screening from Wearable Signals',
+          description: "Wearable heart-risk screening using deceleration capacity theory, ECG/PPG representation learning, and long-horizon aggregation.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/2_project/";
+            },},{id: "projects-saferunrl-safe-reinforcement-learning-for-adaptive-treadmill-control",
+          title: 'SafeRunRL: Safe Reinforcement Learning for Adaptive Treadmill Control',
+          description: "Simulation-based safe RL controller using wearable physiological signals, uncertainty-aware state estimation, and action shielding.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/3_project/";
             },},{id: "projects-orthogonal-polynomials-and-biomedical-uncertainty-quantification",
           title: 'Orthogonal Polynomials and Biomedical Uncertainty Quantification',
           description: "Ph.D. research on recurrence algorithms, polynomial chaos expansion, UncertainSCI, and reliable biomedical simulation.",
           section: "Projects",handler: () => {
-              window.location.href = "/projects/3_project/";
+              window.location.href = "/projects/4_project/";
             },},{
         id: 'social-email',
         title: 'email',

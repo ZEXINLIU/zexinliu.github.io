@@ -51,7 +51,18 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/books/";
               },
-            },{id: "post-inside-nano-vllm-scheduler-paged-kv-cache-prefill-decode-and-sampling",
+            },{id: "post-modern-reinforcement-learning-objectives-bellman-targets-ppo-trpo-grpo-dapo-cispo-and-gspo",
+        
+          title: "Modern Reinforcement Learning Objectives: Bellman Targets, PPO/TRPO, GRPO, DAPO, CISPO, and GSPO",
+        
+        description: "A technical map of Bellman targets, policy gradients, trust-region optimization, PPO clipping, RLHF, DPO, and token- versus sequence-level objectives in modern LLM reinforcement learning.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/modern-reinforcement-learning-objectives/";
+          
+        },
+      },{id: "post-inside-nano-vllm-scheduler-paged-kv-cache-prefill-decode-and-sampling",
         
           title: "Inside nano-vLLM: Scheduler, Paged KV Cache, Prefill/Decode, and Sampling",
         

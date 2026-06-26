@@ -61,7 +61,10 @@ _styles: |
   - [Bellman expectation equation 推导](#bellman-expectation-equation-推导)
   - [Bellman optimality contraction](#bellman-optimality-contraction)
   - [策略梯度定理证明](#策略梯度定理证明)
+  - [KL divergence directionality and estimators](#kl-divergence-directionality-and-estimators)
   - [TRPO trust-region 二阶近似](#trpo-trust-region-二阶近似)
+  - [Bradley-Terry preference model](#bradley-terry-preference-model)
+  - [Statistics related identities](#statistics-related-identities)
 
 ## 0. 阅读和来源说明
 
@@ -71,12 +74,13 @@ _styles: |
 2. **Value-based RL**：看 MC、TD、Sarsa、Q-learning、DQN 如何把 Bellman 递推变成采样 target。
 3. **Policy-based RL**：看策略梯度定理、REINFORCE、baseline、QAC/A2C 和 off-policy actor-critic 如何直接优化 $\pi_\theta$。
 4. **Modern algorithms**：比较 PPO、GRPO、DAPO、CISPO、GSPO、Reward Model、RLHF、DPO 的目标函数、粒度选择和训练稳定性问题。
-5. **Mathematical tools**：回查 Bellman 推导、策略梯度定理、TRPO 二阶近似、Bradley-Terry、KL 非对称性和 KL estimator。
+5. **Mathematical tools**：回查 Bellman 推导、策略梯度定理、KL 非对称性与 KL estimator、TRPO 二阶近似、Bradley-Terry。
 
 来源分层如下：
 
 - **论文是公式和时间线基准**：[DQN](https://arxiv.org/abs/1312.5602) (2013)、[Double DQN](https://arxiv.org/abs/1509.06461) (2015)、[Dueling DQN](https://arxiv.org/abs/1511.06581) (2015)、[TRPO](https://arxiv.org/abs/1502.05477) (2015)、[GAE](https://arxiv.org/abs/1506.02438) (2015)、[Scheduled Sampling](https://arxiv.org/abs/1506.03099) (2015)、[PPO](https://arxiv.org/abs/1707.06347) (2017)、[RLHF summarization](https://arxiv.org/abs/2009.01325) (2020)、[InstructGPT](https://arxiv.org/abs/2203.02155) (2022)、[DPO](https://arxiv.org/abs/2305.18290) (2023)、[GRPO/DeepSeekMath](https://arxiv.org/abs/2402.03300) (2024)、[DAPO](https://arxiv.org/abs/2503.14476) (2025)、[CISPO/MiniMax-M1](https://arxiv.org/abs/2506.13585) (2025)、[GSPO](https://arxiv.org/abs/2507.18071) (2025)。模仿学习中的分布偏移和数据聚合参考 [DAgger](https://proceedings.mlr.press/v15/ross11a.html)。
 - **公开实现用于核对工程对象**：[OpenAI Baselines PPO2](https://github.com/openai/baselines/tree/master/baselines/ppo2) 对应 PPO 的 rollout、advantage、clip、value loss；[OpenAI Spinning Up](https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html) 对应 policy gradient / actor-critic 推导；[Hugging Face TRL](https://github.com/huggingface/trl) 对应 DPO/GRPO 等 trainer 的公开实现；[DAPO 项目页](https://dapo-sia.github.io/) 和 [DAPO 代码](https://github.com/BytedTsinghua-SIA/DAPO) 对应 DAPO 的开源训练 recipe；[MiniMax-M1](https://github.com/MiniMax-AI/MiniMax-M1) 对应 CISPO 的公开发布。
+- **TRPO 的推导参考**：[动手学强化学习 TRPO 章节](https://hrl.boyuai.com/chapter/2/trpo%E7%AE%97%E6%B3%95#113-%E8%BF%91%E4%BC%BC%E6%B1%82%E8%A7%A3) 对应近似求解流程；[TRPO 深度拆解](https://yam.gift/2026/05/11/NLP/LLM-Training/2026-05-11-TRPO/) 对应重要性采样、KL trust region 和后训练视角。
 - **正文代码块是教学化重写**：它们服务于公式理解，保留输入、mask、advantage、ratio 和梯度流向，不等同于某个框架的完整训练脚本。外部博客和中文材料只作为直觉辅助，不作为唯一依据。
 
 # Basic concepts
@@ -770,10 +774,23 @@ $$
 
 ##### 目标与约束
 
-TRPO 的目标不是“每次都更新得很小”，而是“在策略分布变化可控的区域内尽量更新得大”。它先最大化旧策略分布下的新策略 surrogate objective，再用平均 KL 约束限制新旧策略距离：
+TRPO 的核心问题不是“怎样让策略更新小一点”，而是“怎样在尽可能大的更新里仍然相信旧数据给出的梯度”。策略更新有两个耦合变化：动作分布 $\pi(a \mid s)$ 变了，状态访问分布 $\rho_\theta(s)$ 也会跟着变。动作分布可以用重要性采样修正，但状态分布变化很难直接修正，所以 TRPO 用 trust region 把状态分布漂移压在一个可控范围内。
+
+从 performance difference 的角度看，新策略相对旧策略的改进可以写成 advantage 的期望：
 
 $$
-\max_\theta
+J(\theta)-J(\theta_{old})
+=
+\frac{1}{1-\gamma}
+\mathbb{E}_{s\sim d^{\pi_\theta},a\sim\pi_\theta}
+\left[A_{\theta_{old}}(s,a)\right].
+$$
+
+这个式子不能直接优化，因为 $d^{\pi_\theta}$ 依赖新策略 rollout。TRPO 的第一步是把状态分布近似固定在旧策略上，再用动作级 importance ratio 处理新旧动作分布差异：
+
+$$
+L_{\theta_{old}}(\theta)
+=
 \mathbb{E}_{s\sim\rho_{\theta_{old}},a\sim\pi_{\theta_{old}}}
 \left[
 \frac{\pi_\theta(a \mid s)}{\pi_{\theta_{old}}(a \mid s)}
@@ -781,21 +798,39 @@ A_{\theta_{old}}(s,a)
 \right]
 $$
 
+这里的 ratio 只修正 action distribution mismatch；state distribution mismatch 由 trust region 控制。理论上的 monotonic improvement bound 会用更强的 max KL 控制每个状态上的策略变化，实践中 TRPO 通常改用旧策略访问状态上的平均 KL：
+
 $$
+\max_\theta L_{\theta_{old}}(\theta)
+\quad
 \text{s.t.}\quad
+\bar D_{KL}(\theta_{old},\theta)
+=
 \mathbb{E}_{s\sim\rho_{\theta_{old}}}
 \left[
 D_{KL}\left(\pi_{\theta_{old}}(\cdot \mid s) \Vert \pi_\theta(\cdot \mid s)\right)
-\right]\le\delta.
+\right]
+\le\delta.
 $$
 
-##### 机制直觉
+##### 为什么用 KL 做 trust region
 
-如果只最大化 ratio-weighted advantage，策略可以把某些动作概率推得过猛，采样分布和更新后分布迅速脱节；KL trust region 把“策略还能相信这批旧 rollout 多久”变成一个约束。
+策略是概率分布，不是普通参数向量。参数空间里同样长度的一步，在分布空间里可能几乎没有变化，也可能把某些动作概率推到完全不同的位置；所以用欧氏距离约束 $\theta$ 不如直接约束 $\pi_{\theta_{old}}$ 和 $\pi_\theta$ 的分布距离。
 
-##### 实现代价与 PPO 入口
+KL 还有一个重要角色：它控制 ratio 的极端变化。如果只看 surrogate，正 advantage 动作会被持续抬高概率，负 advantage 动作会被持续压低概率，旧 rollout 很快不再代表新策略会访问的区域。KL 约束把“这批旧 rollout 还能被重复利用多久”写成了一个可检查的条件。
 
-TRPO 的工程代价来自解约束优化：线性化 surrogate objective，二阶近似 KL，使用 Fisher-vector product 和 conjugate gradient 近似自然梯度方向，再通过 line search 确认 surrogate 变好且 KL 未越界。推导见 [TRPO trust-region 二阶近似](#trpo-trust-region-二阶近似)。
+实践中使用平均 KL 而不是 max KL，是理论保证和工程可解性之间的折中。max KL 更保守但难估计、难优化；平均 KL 可以直接从 batch states 上估计，也更适合和 Fisher-vector product、conjugate gradient 搭配。这个折中也是 PPO 后来把“硬约束”改成“目标函数内局部惩罚/裁剪”的入口。
+
+##### 近似求解流程
+
+TRPO 的优化对象是带约束的二次局部问题。做法是：
+
+1. 对 surrogate objective 在 $\theta_{old}$ 附近做一阶近似，得到梯度 $g$。
+2. 对平均 KL 在 $\theta_{old}$ 附近做二阶近似，得到 Hessian/Fisher matrix $A$。
+3. 用 conjugate gradient 近似解 $As=g$，得到自然梯度方向 $s\approx A^{-1}g$。
+4. 按 KL 半径缩放步长，再用 backtracking line search 检查真实 surrogate 是否改善、真实平均 KL 是否小于 $\delta$。
+
+完整推导见 [TRPO trust-region 二阶近似](#trpo-trust-region-二阶近似)。关键是：conjugate gradient 只给出“局部二次近似下的好方向”，line search 才负责把近似解拉回真实目标和真实 KL 约束。
 
 ```python
     # TRPO 的核心数据对象：旧策略 rollout、旧 logprob、advantage、KL 约束半径。
@@ -805,14 +840,20 @@ TRPO 的工程代价来自解约束优化：线性化 surrogate objective，二�
     # 平均 KL 不是训练 loss 中的普通 penalty，而是本次 step 是否可接受的约束。
     mean_kl = torch.distributions.kl_divergence(old_dist, new_dist).mean()
 
-    # 真实 TRPO 会用 conjugate gradient 求近似自然梯度方向，
-    # 再 line search 缩小 step，直到 surrogate 改善且 mean_kl <= target_kl。
+    # 真实 TRPO 会用 conjugate gradient 近似求自然梯度方向，
+    # 再 backtracking line search 缩小 step，直到 surrogate 改善且 mean_kl <= target_kl。
     accept_step = (surrogate > old_surrogate) and (mean_kl <= target_kl)
 ```
+
+##### 为什么 PPO 是 TRPO 的工程替代
+
+TRPO 的优点是思路很干净：surrogate 负责改进，KL 负责可信半径，自然梯度负责在分布空间里走一条合理方向，line search 负责兜底。缺点也正来自这里：Fisher-vector product、conjugate gradient、backtracking line search 让实现复杂，而且对大模型后训练的分布式训练和 minibatch 多轮更新都不友好。
 
 PPO 的 clipped surrogate 是 TRPO 思想的一阶工程替代：不再显式求自然梯度和 line search，而是在目标函数里直接限制 ratio 的收益。它牺牲了 TRPO 的显式约束解法，换来普通 SGD/Adam、多 epoch minibatch 和更简单的实现。
 
 这条关系也是理解后续 GRPO/DAPO/CISPO/GSPO 的入口：它们都在问同一个问题，旧策略采样得到的数据，更新几轮以后还能不能继续提供可信梯度；分歧只是“限制 token ratio、sequence ratio、IS 权重，还是直接 mask token”。
+
+参考：[TRPO 原文](https://arxiv.org/abs/1502.05477)、[动手学强化学习 TRPO 章节](https://hrl.boyuai.com/chapter/2/trpo%E7%AE%97%E6%B3%95#113-%E8%BF%91%E4%BC%BC%E6%B1%82%E8%A7%A3)、[TRPO 深度拆解](https://yam.gift/2026/05/11/NLP/LLM-Training/2026-05-11-TRPO/)。
 
 <a id="proximal-policy-optimization-ppo"></a>
 
@@ -1746,9 +1787,143 @@ $$
 
 trajectory 形式更适合解释 REINFORCE/PPO 代码；discounted occupancy 形式更适合和 Bellman、actor-critic 的状态分布对齐。不同资料省略 $\frac{1}{1-\gamma}$ 时，通常是把常数吸收到学习率或采用未归一化 occupancy measure。
 
+### KL divergence directionality and estimators
+
+KL divergence 衡量“用分布 $q$ 编码真实分布 $p$ 会多付出多少信息长度”。它不是对称距离，方向会改变优化行为。这个方向性在 RLHF、DPO、TRPO/PPO 的 KL 约束里非常重要。
+
+Forward KL 是：
+
+$$
+D_{KL}(p \Vert q)
+=
+\mathbb{E}_{x\sim p}
+\left[
+\log\frac{p(x)}{q(x)}
+\right].
+$$
+
+如果把 $p$ 当作真实分布、 $q$ 当作近似分布，forward KL 的权重来自 $p(x)$。在 $p(x)$ 大的区域， $q(x)$ 不能太小，否则代价会很大；在 $p(x)$ 小的区域， $q(x)$ 的影响较弱。因此 forward KL 往往是 zero avoiding / mode covering：它倾向于让 $q$ 覆盖 $p$ 的主要概率质量。当 $p$ 是多峰分布而 $q$ 只能是单峰分布时，forward KL 常会让 $q$ 变得更宽，试图覆盖多个峰。
+
+Reverse KL 是：
+
+$$
+D_{KL}(q \Vert p)
+=
+\mathbb{E}_{x\sim q}
+\left[
+\log\frac{q(x)}{p(x)}
+\right].
+$$
+
+Reverse KL 的权重来自 $q(x)$。如果 $p(x)$ 很小而 $q(x)$ 不小，代价会非常大；但 $p(x)$ 大而 $q(x)$ 小的区域不会被强烈惩罚。因此 reverse KL 往往是 zero forcing / mode seeking：它倾向于避开 $p$ 的低概率区域，宁愿选择一个窄峰。RLHF 中常见的 reference KL 如果写成 $D_{KL}(\pi_\theta \Vert \pi_{ref})$，就是把当前策略当作 $q$、reference policy 当作 $p$ 的 reverse KL。
+
+KL estimator 常见于 PPO/GRPO/RLHF 的 token-level KL 监控。考虑 reverse KL：
+
+$$
+D_{KL}(q \Vert p)
+=
+\mathbb{E}_{x\sim q}
+\left[
+\log\frac{q(x)}{p(x)}
+\right].
+$$
+
+定义 likelihood ratio：
+
+$$
+\delta(x)=\frac{p(x)}{q(x)}.
+$$
+
+则 reverse KL 可以写成：
+
+$$
+D_{KL}(q \Vert p)=\mathbb{E}_{x\sim q}[-\log \delta(x)].
+$$
+
+**$k_1 = -\log \delta(x)$.** 这是直接按照定义得到的无偏估计：
+
+$$
+\mathbb{E}_{x\sim q}[k_1]
+=
+D_{KL}(q \Vert p).
+$$
+
+问题是 $k_1$ 的单样本值可能为负，而 KL 的总体期望非负；这会带来较大方差，训练日志也不直观。
+
+**$k_2 = \frac{1}{2}(\log \delta(x))^{2}$.** 它恒为非负，方差通常更低，但只是在 $p$ 和 $q$ 接近时近似 KL。可以从 $f$-divergence 的二阶展开理解：
+
+$$
+D_f(p,q)
+=
+\mathbb{E}_{x\sim q}
+\left[
+f\left(\frac{p(x)}{q(x)}\right)
+\right].
+$$
+
+当 $q$ 接近 $p$ 且 $f$ 可微时， $f$-divergence 在局部二阶意义上相似：
+
+$$
+D_f(p_0,p_\theta)
+=
+\frac{f''(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
+$$
+
+其中 $F$ 是 Fisher information matrix。KL 对应 $f(x)=-\log x$， $k_2$ 对应 $f(x)=\frac{1}{2}(\log x)^2$；二者在 $\delta(x)\approx 1$ 时二阶项一致。
+
+**$k_3 = \delta(x) - 1 - \log \delta(x) = \delta(x)-1+k_1$.** 它利用了一个期望为 0 的 control variate：
+
+$$
+\begin{aligned}
+\mathbb{E}_{x\sim q}[\delta(x)-1]
+&=
+\mathbb{E}_{x\sim q}
+\left[
+\frac{p(x)}{q(x)}-1
+\right]\\
+&=
+\int q(x)\left(\frac{p(x)}{q(x)}-1\right)dx\\
+&=
+\int p(x)dx-\int q(x)dx\\
+&=0.
+\end{aligned}
+$$
+
+因此 $k_3$ 仍然是无偏估计：
+
+$$
+\mathbb{E}_{x\sim q}[k_3]
+=
+D_{KL}(q \Vert p).
+$$
+
+同时由 $\delta-1-\log\delta\ge0$ 可知， $k_3$ 的单样本值非负；在 $\delta\approx1$ 时，
+
+$$
+\delta-1-\log\delta
+\approx
+\frac{1}{2}(\delta-1)^2.
+$$
+
+所以 $k_3$ 常被用作兼顾无偏性、低方差和非负单样本值的 KL estimator。GRPO 中的 token-level KL 估计通常就采用这个形式：
+
+$$
+\hat D_{KL}
+=
+\frac{\pi_{ref}(o_t \mid q,o_{\lt t})}
+{\pi_\theta(o_t \mid q,o_{\lt t})}
+-
+\log
+\frac{\pi_{ref}(o_t \mid q,o_{\lt t})}
+{\pi_\theta(o_t \mid q,o_{\lt t})}
+-1.
+$$
+
+参考：[Approximating KL Divergence](http://joschu.net/blog/kl-approx.html)。
+
 ### TRPO trust-region 二阶近似
 
-TRPO 的约束优化写成：
+TRPO 的原始约束优化是：
 
 $$
 \max_\theta L_{\theta_{old}}(\theta)
@@ -1758,28 +1933,32 @@ $$
 \bar D_{KL}(\theta_{old},\theta)\le\delta.
 $$
 
-在 $\theta_{old}$ 附近对目标做一阶近似、对 KL 做二阶近似：
+为了得到一个可求解的局部问题，在 $\theta_{old}$ 附近令 $x=\theta-\theta_{old}$。对 surrogate objective 做一阶近似：
 
 $$
-L_{\theta_{old}}(\theta)\approx
-L_{\theta_{old}}(\theta_{old})+g^{T}(\theta-\theta_{old}),
+L_{\theta_{old}}(\theta)
+\approx
+L_{\theta_{old}}(\theta_{old})+g^{T}x,
 $$
 
-$$
-\bar D_{KL}(\theta_{old},\theta)\approx
-\frac{1}{2}(\theta-\theta_{old})^{T}A(\theta-\theta_{old}),
-$$
-
-其中 $A$ 是 KL Hessian，也就是 Fisher information matrix 的经验近似；一阶项为：
+其中
 
 $$
 g=
 \left.
 \nabla_\theta L_{\theta_{old}}(\theta)
-\right\rvert_{\theta=\theta_{old}}
+\right\rvert_{\theta=\theta_{old}}.
 $$
 
-于是局部问题变成：
+对平均 KL 做二阶近似：
+
+$$
+\bar D_{KL}(\theta_{old},\theta)
+\approx
+\frac{1}{2}x^{T}Ax,
+$$
+
+其中 $A$ 是平均 KL 的 Hessian，也可以看作 Fisher information matrix 的经验近似。于是局部问题变成：
 
 $$
 \max_x g^{T}x
@@ -1789,115 +1968,97 @@ $$
 \frac{1}{2}x^{T}Ax\le\delta.
 $$
 
-其方向与自然梯度一致：
+用 Lagrangian 求解：
 
 $$
-s\approx A^{-1}g.
+\mathcal{L}(x,\lambda)
+=
+g^{T}x
+-
+\lambda\left(\frac{1}{2}x^{T}Ax-\delta\right).
 $$
 
-大模型里不会显式形成 $A^{-1}$，而是用 conjugate gradient 通过 Fisher-vector product 近似求解 $As=g$。步长由 KL 约束给出：
+对 $x$ 求导并令其为 0：
 
 $$
+g-\lambda Ax=0
+\quad\Rightarrow\quad
+x=\frac{1}{\lambda}A^{-1}g.
+$$
+
+这说明最优方向是自然梯度方向。令
+
+$$
+s=A^{-1}g,
+$$
+
+再由 KL 约束确定缩放系数：
+
+$$
+\frac{1}{2}(\beta s)^{T}A(\beta s)=\delta
+\quad\Rightarrow\quad
 \beta=\sqrt{\frac{2\delta}{s^{T}As}}.
 $$
 
-最后 TRPO 做 line search：从 $\theta_{old}+\beta s$ 开始逐步缩小步长，直到 surrogate objective 改善且真实平均 KL 不超过 $\delta$。没有这个 line search，二阶近似误差可能让一次更新跨出 trust region，造成性能崩塌。
-
-- Bradley-Terry (BT) model (useful in DPO)
-- 目的：model preference 人类偏好模型。它是一种用于预测两个竞争者（如个人或团队）结果的概率模型，常用于处理成对比较的数据，通常用来估计和比较个体或项目的相对能力
+所以局部二次近似下的候选更新是：
 
 $$
-Pr(i\gt j) = \frac{p_i}{p_i + p_j} = \frac{e^{\beta_i}}{e^{\beta_i} + e^{\beta_j}} = \frac{1}{1 + e^{-(\beta_i - \beta_j)}} = \sigma(\beta_i - \beta_j),
+\theta_{candidate}
+=
+\theta_{old}
++\sqrt{\frac{2\delta}{s^{T}As}}s.
 $$
 
-$p_i$ 是 $i$ 的正实数分数， $p_i = e^{\beta_i}$ 是对应的指数分数函数
-
-- 核心：loss function $y(x) = -\log \sigma(x) = -\log \sigma(\beta_i - \beta_j)$
-- if $\beta_i - \beta_j \rightarrow +\infty$, then $y \rightarrow 0$，即BT模型 $\beta_i$ 与 $\beta_j$ 分数差值越大，loss 越小
-- if $\beta_i - \beta_j \rightarrow -\infty$, then $y \rightarrow +\infty$
-
-- KL divergence 的非对称性
-- 假定已知随机变量 $p$，求相对简单的随机变量 $q$，使得 $q$ 尽量接近 $p$
-- 正向KL散度
-- 权重 $p(x)$
-- 在 $p(x)$ 大的地方，想让 KL 散度小，就需要 $q(x)$ 的值也尽量大；在 $p(x)$ 小的地方， $q(x)$ 对整体影响不大
-- 要想使正向 KL 散度最小，则要求在 $p(x)$ 不为 0 的地方， $q(x)$ 也尽量不为 0，所以正向 KL 散度被称为是 zero avoiding
-- 得到的分布 $q(x)$ 是一个比较 “宽” 的分布
+实际深度网络不会显式形成 $A$ 或 $A^{-1}$。TRPO 使用 conjugate gradient 近似求解线性系统：
 
 $$
-q^{\ast} = \mathrm{argmin}_q D_{KL}(p \Vert q) = \mathrm{argmin}_q p(x) \log\frac{p(x)}{q(x)}
+As=g,
 $$
 
-- 反向KL散度 (used in RLHF)
-- 权重 $q(x)$
-- 在 $p(x)$ 小的地方，想让 KL 散度小，就需要 $q(x)$ 的值也尽量小；在 $p(x)$ 大的地方，可以适当忽略
-- 要想使反向 KL 散度最小，则要求在 $p(x)$ 为 0 的地方， $q(x)$ 也尽量为 0，所以反向 KL 散度被称为是 zero forcing
-- 得到的分布 $q(x)$ 是一个比较 “窄” 的分布
+其中矩阵向量积 $Av$ 通过 Fisher-vector product 得到。这个过程只需要计算 KL Hessian 对向量的乘积，不需要存下完整 Hessian。
+
+最后还需要 backtracking line search。从 $\theta_{candidate}$ 开始，如果真实 surrogate 没有提升，或者真实平均 KL 超过 $\delta$，就把步长乘以一个衰减系数继续尝试：
 
 $$
-q^{\ast} = \mathrm{argmin}_q D_{KL}(q \Vert p) = \mathrm{argmin}_q q(x) \log\frac{q(x)}{p(x)}
+\theta_{new}
+=
+\theta_{old}
++\alpha\beta s,
+\quad
+\alpha\in\lbrace 1,\eta,\eta^2,\dots\rbrace.
 $$
 
-- 例子：令 $p$ 是两个高斯分布的混合，令 $q$ 为单个高斯分布。那么两种 KL 散度如何选择呢？
-- 正向：更在意真实分布 $p$ 中的常见事件，也就是两峰，我们要优先确保它们在分布 $q$ 中不是特别罕见（信息长度不是特别长）。当 $p$ 具有多个峰时， $q$ 选择将这些峰模糊到一起，以便将高概率质量放到所有峰上
-- 反向：更在意真实分布 $p$ 中的罕见事件，也就是谷底，我们要优先确保它们在分布 $q$ 中不是特别常见（信息长度特别长的那些事件）。当 $p$ 具有多个峰并且这些峰间隔很宽时，最小化 KL 散度会选择单个峰，以避免将概率质量放置在 $p$ 的多个峰之间的低概率区域中
+这里 line search 不是工程装饰，而是在补偿二阶近似误差、有限 batch 估计误差、神经网络非线性和优化器数值误差。没有这一步，局部二次模型给出的“可行”更新在真实策略空间里可能已经越过 trust region。
 
-**KL divergence estimation.** 考虑反向 KL 散度：
+参考：[TRPO 原文](https://arxiv.org/abs/1502.05477)、[动手学强化学习 TRPO 章节](https://hrl.boyuai.com/chapter/2/trpo%E7%AE%97%E6%B3%95#113-%E8%BF%91%E4%BC%BC%E6%B1%82%E8%A7%A3)、[TRPO 深度拆解](https://yam.gift/2026/05/11/NLP/LLM-Training/2026-05-11-TRPO/)。
 
-$$
-D_{KL}(q \Vert p) = \sum_x q(x)\log\frac{q(x)}{p(x)} = \mathbb{E}_{x\sim q} \left[ \log\frac{q(x)}{p(x)} \right]
-$$
+### Bradley-Terry preference model
 
-目标是得到无偏或小偏差、低方差的 KL 估计。定义 $\delta(x) = \frac{p(x)}{q(x)}$。
-
-**$k_1 = -\log \delta(x)$.** 这是直接按照定义得到的无偏估计；但一半的估计是负数，而 KL 是非负数，所以方差较大。
-
-**$k_2 = \frac{1}{2}(\log \delta(x))^{2}$.** 这个估计可以从 $f$-divergence 的二阶近似理解：
+Bradley-Terry model 用于建模成对偏好。给定两个回答 $i$ 和 $j$，如果它们的隐含分数分别是 $\beta_i$ 和 $\beta_j$，那么 $i$ 优于 $j$ 的概率为：
 
 $$
-D_f(p,q) = \mathbb{E}_{x\sim q} \left[ f\left(\frac{p(x)}{q(x)}\right) \right]
+Pr(i\gt j)
+=
+\frac{e^{\beta_i}}{e^{\beta_i}+e^{\beta_j}}
+=
+\frac{1}{1+e^{-(\beta_i-\beta_j)}}
+=
+\sigma(\beta_i-\beta_j).
 $$
 
-When $f$ is differentiable and $q$ is close to $p$, f-divergences look like KL divergence up to second order. For a parametrized distribution $p_\theta$:
+偏好模型只关心分数差，而不关心两个分数的共同平移。常见 loss 是：
 
 $$
-D_f(p_0,p_\theta) = \frac{f''(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
+\mathcal{L}_{BT}
+=
+-\log\sigma(\beta_i-\beta_j).
 $$
 
-where $F$ is the Fisher information matrix for $p_\theta$ evaluated at $p_\theta=p_0$.
+当 $\beta_i-\beta_j\rightarrow+\infty$ 时，loss 趋近于 0；当 $\beta_i-\beta_j\rightarrow-\infty$ 时，loss 迅速增大。DPO 的推导正是把 reward difference 替换成策略相对 reference policy 的 log-ratio difference，从而绕开显式 reward model。
 
-KL 散度对应 $f(x) = -\log(x)$， $k_2$ 对应 $f(x) = \frac{1}{2}(\log x)^{2}$。有偏（小偏差）的二阶展开为：
+### Statistics related identities
 
-$$
-f\left(\frac{q(x)}{p(x)}\right) = f(1+\epsilon) \approx f(1)+f'(1)\epsilon+\frac{1}{2}f''(1)\epsilon^{2}
-$$
-
-$k_1,k_2$ 的 $f''(1)=1$。$k_2$ 恒为正，因此方差较低，但它是小偏差估计。
-
-**$k_3 = \delta(x) - 1 - \log \delta(x) = \delta(x) - 1 + k_1$.** 它通过加入期望为 0 的修正项，让估计保持无偏：
-
-$$
-\begin{aligned}
-\mathbb{E}_q[\delta(x) - 1] &= \mathbb{E}_q[\frac{p(x)}{q(x)} - 1] \\
-&= \int q(x) (\frac{p(x)}{q(x)} - 1) dx \\
-&= \int p(x) dx - \int q(x) dx \\
-&= 0
-\end{aligned}
-$$
-
-所以对任意的 $\lambda$， $k_1 + \lambda (\delta(x) - 1)$ 都是无偏估计，选择一个 $\lambda$ 使得方差最小（最简单 $\lambda = 1$）。直觉上，$\delta(x)-1$ 与 $k_1$ 负相关，可以拉低方差：
-
-$$
-\delta(x) - 1 \propto \log\delta(x) = -k_1
-$$
-
-- 真实分布对应的参考分布 $\pi_{ref}$，非真实分布对应当前策略 $\pi_\theta$
-- 参考
-- http://joschu.net/blog/kl-approx.html
-- https://zhuanlan.zhihu.com/p/1893782254100115959
-
-- Statistics related
-- Chain rule of conditional probability
+**Chain rule of conditional probability.**
 
 $$
 \begin{aligned}
@@ -1906,7 +2067,7 @@ p(x \mid a) &= \sum_b p(x, b \mid a) \quad \text{law of total (cond) prob}\\
 \end{aligned}
 $$
 
-- Law of total expectation
+**Law of total expectation.**
 
 $$
 \begin{aligned}
@@ -1917,7 +2078,7 @@ $$
 \end{aligned}
 $$
 
-- Law of total (conditional) expectation
+**Law of total conditional expectation.**
 
 $$
 \begin{aligned}

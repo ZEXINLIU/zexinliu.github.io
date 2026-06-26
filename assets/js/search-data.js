@@ -537,7 +537,10 @@ ninja.data = [{
           description: "",
           section: "News",handler: () => {
               window.location.href = "/news/announcement_4/";
-            },},{id: "projects-24h-cuffless-blood-pressure-monitoring",
+            },},{id: "news-as-a-core-contributor-to-honor-s-cardiovascular-health-algorithms-zexin-led-the-cardiovascular-health-team-to-receive-the-honor-competitive-technology-development-team-award-sparkles",
+          title: 'As a core contributor to HONOR’s cardiovascular health algorithms, Zexin led the cardiovascular...',
+          description: "",
+          section: "News",},{id: "projects-24h-cuffless-blood-pressure-monitoring",
           title: '24H Cuffless Blood Pressure Monitoring',
           description: "Wearable PPG blood pressure monitoring with personalization, calibration, and product-level robustness.",
           section: "Projects",handler: () => {
@@ -547,9 +550,9 @@ ninja.data = [{
           description: "Wearable heart-risk screening using deceleration capacity theory, ECG/PPG representation learning, and long-horizon aggregation.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/2_project/";
-            },},{id: "projects-saferunrl-safe-reinforcement-learning-for-adaptive-treadmill-control",
-          title: 'SafeRunRL: Safe Reinforcement Learning for Adaptive Treadmill Control',
-          description: "Simulation-based safe RL controller using wearable physiological signals, uncertainty-aware state estimation, and action shielding.",
+            },},{id: "projects-saferunrl-ppo-for-target-heart-rate-treadmill-control",
+          title: 'SafeRunRL: PPO for Target-Heart-Rate Treadmill Control',
+          description: "Research prototype for target-heart-rate treadmill control using wearable PPG/ACC states, a learned heart-rate response environment, and PPO.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/3_project/";
             },},{id: "projects-orthogonal-polynomials-and-biomedical-uncertainty-quantification",

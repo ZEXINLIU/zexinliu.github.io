@@ -7,6 +7,9 @@ tags: reinforcement-learning policy-gradient llm-rl ppo rlhf
 categories: technical-notes
 featured: true
 _styles: |
+  .post-content pre,
+  .post-content figure.highlight pre,
+  .post-content figure.highlight pre code,
   .post-content pre code {
     white-space: pre;
     word-wrap: normal;
@@ -103,7 +106,7 @@ $$
 如果环境模型已知，最核心的两个概率对象是状态转移和奖励分布：
 
 $$
-p(s'|s,a), \quad p(r|s,a)
+p(s' \mid s,a), \quad p(r \mid s,a)
 $$
 
 这两个对象决定 model-based dynamic programming 是否可用；如果它们未知，就要转向 MC、TD、Sarsa、Q-learning 这类 model-free 采样算法。
@@ -113,17 +116,17 @@ $$
 State value 衡量“从状态 $s$ 出发并继续执行策略 $\pi$，未来总回报的期望”：
 
 $$
-v_\pi(s) = \mathbb{E}[G_t|S_t=s] = \mathbb{E}[R_{t+1}|S_t=s] + \gamma\mathbb{E}[G_{t+1}|S_t=s]
+v_\pi(s) = \mathbb{E}[G_t \mid S_t=s] = \mathbb{E}[R_{t+1} \mid S_t=s] + \gamma\mathbb{E}[G_{t+1} \mid S_t=s]
 $$
 
 Bellman expectation equation 把 $v_\pi(s)$ 拆成即时奖励和下一个状态价值。它的元素形式、矩阵形式和 expectation form 是同一件事的三种写法：
 
 $$
 \begin{aligned}
-v_\pi(s) &= \sum_{a\in\mathcal{A}}\pi(a|s)\left[\sum_r p(r|s,a)r + \gamma \sum_{s'\in \mathcal{S}}p(s'|s,a) v_\pi(s')\right] \\
-v_\pi(s) &= r_\pi(s) + \gamma\sum_{s'\in\mathcal{S}} p_\pi(s'|s) v_\pi(s') \\
+v_\pi(s) &= \sum_{a\in\mathcal{A}}\pi(a \mid s)\left[\sum_r p(r \mid s,a)r + \gamma \sum_{s'\in \mathcal{S}}p(s' \mid s,a) v_\pi(s')\right] \\
+v_\pi(s) &= r_\pi(s) + \gamma\sum_{s'\in\mathcal{S}} p_\pi(s' \mid s) v_\pi(s') \\
 v_\pi &= r_\pi+\gamma P_\pi v_\pi \\
-v_\pi(s) &= \mathbb{E}[R_{t+1} + \gamma v_\pi(S_{t+1})|S_t=s].
+v_\pi(s) &= \mathbb{E}[R_{t+1} + \gamma v_\pi(S_{t+1}) \mid S_t=s].
 \end{aligned}
 $$
 
@@ -134,8 +137,8 @@ $$
 $$
 \begin{aligned}
 v_\pi &= r_\pi+\gamma P_\pi v_\pi,\\
-\left[P_\pi\right]_{i,j} &= p_\pi(s_j|s_i),\\
-v_\pi(s_i) &= r_\pi(s_i)+\gamma\sum_{s_j\in\mathcal{S}}p_\pi(s_j|s_i)v_\pi(s_j).
+\left[P_\pi\right]_{i,j} &= p_\pi(s_j \mid s_i),\\
+v_\pi(s_i) &= r_\pi(s_i)+\gamma\sum_{s_j\in\mathcal{S}}p_\pi(s_j \mid s_i)v_\pi(s_j).
 \end{aligned}
 $$
 
@@ -149,7 +152,7 @@ $P_\pi$ 是非负随机矩阵，每一行和为 1。由此可以得到两类求�
 Bellman expectation equation 评估给定策略；Bellman optimality equation 直接问“当前状态下能达到的最优价值是多少”。元素形式是：
 
 $$
-v(s)=\max_{\pi(s)\in\Pi(s)}\sum_{a\in\mathcal{A}}\pi(a|s)q(s,a)
+v(s)=\max_{\pi(s)\in\Pi(s)}\sum_{a\in\mathcal{A}}\pi(a \mid s)q(s,a)
 $$
 
 矩阵形式可以写成非线性固定点问题：
@@ -158,9 +161,9 @@ $$
 \begin{aligned}
 v &= \max_{\pi\in\Pi}(r_\pi+\gamma P_\pi v)=f(v),\\
 \left[r_\pi\right]_s
-&= \sum_{a\in\mathcal{A}}\pi(a|s)\sum_{r\in\mathcal{R}}p(r|s,a)r,\\
+&= \sum_{a\in\mathcal{A}}\pi(a \mid s)\sum_{r\in\mathcal{R}}p(r \mid s,a)r,\\
 \left[P_\pi\right]_{s,s'}
-&= \sum_{a\in\mathcal{A}}\pi(a|s)p(s'|s,a).
+&= \sum_{a\in\mathcal{A}}\pi(a \mid s)p(s' \mid s,a).
 \end{aligned}
 $$
 
@@ -191,31 +194,31 @@ $$
 Action value 衡量“已经在状态 $s$ 选定动作 $a$ 后，再继续执行策略 $\pi$ 的未来总回报期望”：
 
 $$
-q_\pi(s,a) = \mathbb{E}[G_t|S_t=s,A_t=a]
+q_\pi(s,a) = \mathbb{E}[G_t \mid S_t=s,A_t=a]
 $$
 
 它和 state value 的关系是：
 
 $$
-v_\pi(s) = \sum_{a\in\mathcal{A}}\pi(a|s)q_\pi(s,a)
+v_\pi(s) = \sum_{a\in\mathcal{A}}\pi(a \mid s)q_\pi(s,a)
 $$
 
 给定 $(s,a)$ 后，第一步动作已经不再由策略采样，因此动作价值的 Bellman expectation equation 先展开环境，再展开下一状态的策略：
 
 $$
-q_\pi(s,a) = \sum_{r\in\mathcal{R}}p(r|s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s'|s,a)v_\pi(s')
+q_\pi(s,a) = \sum_{r\in\mathcal{R}}p(r \mid s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s' \mid s,a)v_\pi(s')
 $$
 
 等价地，可以完全写成 action-value 递推：
 
 $$
 \begin{aligned}
-q_\pi(s,a) &= \sum_{r\in\mathcal{R}}p(r|s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s'|s,a) \left(\sum_{a'\in\mathcal{A}}\pi(a'|s')q_\pi(s',a')\right) \\
-q_\pi(s,a) &= \mathbb{E}[R_{t+1} + \gamma q_\pi(S_{t+1},A_{t+1})|S_t=s,A_t=a].
+q_\pi(s,a) &= \sum_{r\in\mathcal{R}}p(r \mid s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s' \mid s,a) \left(\sum_{a'\in\mathcal{A}}\pi(a' \mid s')q_\pi(s',a')\right) \\
+q_\pi(s,a) &= \mathbb{E}[R_{t+1} + \gamma q_\pi(S_{t+1},A_{t+1}) \mid S_t=s,A_t=a].
 \end{aligned}
 $$
 
-上面两个式子的等价性来自条件独立分解 $p(s',a'|s,a)=p(s'|s,a)\pi(a'|s')$。直觉上，采取动作 $a_t$ 的价值 = 这个动作带来的即时奖励 + 它导致的下一状态的平均动作价值。
+上面两个式子的等价性来自条件独立分解 $p(s',a' \mid s,a)=p(s' \mid s,a)\pi(a' \mid s')$。直觉上，采取动作 $a_t$ 的价值 = 这个动作带来的即时奖励 + 它导致的下一状态的平均动作价值。
 
 在所有 state-action pair 上写成向量方程：
 
@@ -224,9 +227,9 @@ $$
 q_\pi &= \tilde r+\gamma P\Pi q_\pi,\\
 \left[q_\pi\right]_{(s,a)} &= q_\pi(s,a),\\
 \left[\tilde r\right]_{(s,a)}
-&= \sum_{r\in\mathcal{R}}p(r|s,a)r,\\
-\left[P\right]_{(s,a),s'} &= p(s'|s,a),\\
-\Pi_{s',a'} &= \pi(a'|s').
+&= \sum_{r\in\mathcal{R}}p(r \mid s,a)r,\\
+\left[P\right]_{(s,a),s'} &= p(s' \mid s,a),\\
+\Pi_{s',a'} &= \pi(a' \mid s').
 \end{aligned}
 $$
 
@@ -234,8 +237,8 @@ Action value 的 Bellman optimality equation 是 Q-learning 和 DQN 的直接来
 
 $$
 \begin{aligned}
-q^{\ast}(s,a) &= r(s,a) + \gamma\sum_{s'\in\mathcal{S}} p(s'|s,a) \max_{a'} q^{\ast}(s',a') \\
-q^{\ast}(s,a) &= \mathbb{E}[R_{t+1} + \gamma \max_{a'} q^{\ast}(S_{t+1},a')|S_t=s,A_t=a].
+q^{\ast}(s,a) &= r(s,a) + \gamma\sum_{s'\in\mathcal{S}} p(s' \mid s,a) \max_{a'} q^{\ast}(s',a') \\
+q^{\ast}(s,a) &= \mathbb{E}[R_{t+1} + \gamma \max_{a'} q^{\ast}(S_{t+1},a') \mid S_t=s,A_t=a].
 \end{aligned}
 $$
 
@@ -247,7 +250,7 @@ Value-based 方法的主线是：先估计 $v(s)$ 或 $q(s,a)$，再通过 greed
 
 ### Model-Based Dynamic Programming
 
-Dynamic programming 假设环境模型已知，即奖励概率 $p(r|s,a)$ 和状态转移概率 $p(s'|s,a)$ 可用。奖励概率可以进一步得到 $r(s,a)=\sum_r p(r|s,a)r$，转移概率告诉我们在状态 $s$ 执行动作 $a$ 后，会以什么概率到达各个 $s'$。
+Dynamic programming 假设环境模型已知，即奖励概率 $p(r \mid s,a)$ 和状态转移概率 $p(s' \mid s,a)$ 可用。奖励概率可以进一步得到 $r(s,a)=\sum_r p(r \mid s,a)r$，转移概率告诉我们在状态 $s$ 执行动作 $a$ 后，会以什么概率到达各个 $s'$。
 
 #### Value Iteration
 
@@ -270,7 +273,7 @@ $$
 元素视角下，流程是：
 
 $$
-v_k(s) \rightarrow q_k(s,a) \rightarrow a^{\ast}(s) \rightarrow \pi_{k+1}(a|s) \rightarrow v_{k+1}(s)
+v_k(s) \rightarrow q_k(s,a) \rightarrow a^{\ast}(s) \rightarrow \pi_{k+1}(a \mid s) \rightarrow v_{k+1}(s)
 $$
 
 #### Policy Iteration
@@ -296,21 +299,21 @@ $$
 $$
 
 $$
-\pi_{k+1} = \mathrm{argmax}_{\pi}\sum_a\pi(a|s)q_{\pi_k}(s,a)
+\pi_{k+1} = \mathrm{argmax}_{\pi}\sum_a\pi(a \mid s)q_{\pi_k}(s,a)
 $$
 
 这里 $q_{\pi_k}(s,a)$ 的作用很关键：policy evaluation 先估计 $v_{\pi_k}(s)$，再通过 system model 得到 $q_{\pi_k}(s,a)$；policy improvement 基于 $q_{\pi_k}(s,a)$ 得到新的 $\pi_{k+1}$。
 
 ### Model-Free Value Learning
 
-Model-free 方法不直接使用 $p(s'|s,a)$ 和 $p(r|s,a)$，而是从采样轨迹构造目标。MC、TD、Sarsa、Q-learning 的差别主要体现在 target 的随机变量数量、是否等 episode 结束、以及下一步动作来自真实采样还是贪心最大化。
+Model-free 方法不直接使用 $p(s' \mid s,a)$ 和 $p(r \mid s,a)$，而是从采样轨迹构造目标。MC、TD、Sarsa、Q-learning 的差别主要体现在 target 的随机变量数量、是否等 episode 结束、以及下一步动作来自真实采样还是贪心最大化。
 
 #### Monte Carlo Control
 
 Monte Carlo 用完整 episode 的 return 来估计动作价值：
 
 $$
-q_{\pi_k}(s,a) = \mathbb{E}[G_t|S_t=s,A_t=a]
+q_{\pi_k}(s,a) = \mathbb{E}[G_t \mid S_t=s,A_t=a]
 $$
 
 从 $(s,a)$ 出发并继续执行 $\pi_k$，若采到 $n$ 条 episode，第 $i$ 条回报为 $g_{\pi_k}^{(i)}(s,a)$，则：
@@ -340,7 +343,7 @@ $$
 这个更新可以看作把 Robbins-Monro stochastic approximation 用在 Bellman expectation equation 上：
 
 $$
-v_\pi(s) = \mathbb{E}[R_{t+1}+\gamma v_\pi(S_{t+1})|S_t=s]
+v_\pi(s) = \mathbb{E}[R_{t+1}+\gamma v_\pi(S_{t+1}) \mid S_t=s]
 $$
 
 TD 的特征是 bootstrapping、低方差、高偏差、增量式；每收到一个 transition 就能更新一次。
@@ -360,7 +363,7 @@ $$
 其余 $(s,a) \neq (s_t,a_t)$ 保持不变。这个更新对应 action-value Bellman expectation equation：
 
 $$
-q_\pi(s,a) = \mathbb{E}[R + \gamma q_\pi(S',A')|s,a]
+q_\pi(s,a) = \mathbb{E}[R + \gamma q_\pi(S',A') \mid s,a]
 $$
 
 采样链路是：
@@ -386,7 +389,7 @@ $$
 它对应 Bellman optimality equation：
 
 $$
-q^{\ast}(s,a) = \mathbb{E}[R_{t+1} + \gamma \max_{a\in\mathcal{A}(S_{t+1})} q^{\ast}(S_{t+1},a)|S_t=s,A_t=a]
+q^{\ast}(s,a) = \mathbb{E}[R_{t+1} + \gamma \max_{a\in\mathcal{A}(S_{t+1})} q^{\ast}(S_{t+1},a) \mid S_t=s,A_t=a]
 $$
 
 采样链路只需要：
@@ -455,8 +458,8 @@ $$
 
 DQN 的基本稳定化手段是 target network 和 replay buffer：
 
-1. online network $w$ 每个 gradient step 更新；target network $w_T$ 每隔 $C$ 次迭代复制 $w$。
-2. replay buffer 存储 $\mathcal{B} = \lbrace(s,a,r,s')\rbrace$，近似均匀采样以打破连续样本相关性。
+- online network $w$ 每个 gradient step 更新；target network $w_T$ 每隔 $C$ 次迭代复制 $w$。
+- replay buffer 存储 $\mathcal{B} = \lbrace(s,a,r,s')\rbrace$，近似均匀采样以打破连续样本相关性。
 
 原始 DQN 的训练方式是边交互边训练：每执行一步动作就从回放池采样训练一次，提高数据利用效率。
 
@@ -465,7 +468,7 @@ DQN 的基本稳定化手段是 target network 和 replay buffer：
 Dueling DQN 改变网络架构，把状态价值和动作优势拆开：
 
 $$
-q(s,a) = v(s) + A(s,a) - \frac{1}{|\mathcal{A}|}\sum_{a'\in\mathcal{A}} A(s,a')
+q(s,a) = v(s) + A(s,a) - \frac{1}{\lvert\mathcal{A}\rvert}\sum_{a'\in\mathcal{A}} A(s,a')
 $$
 
 这个结构适合很多动作差异不明显的状态。实现上通常是共享 backbone 后接 value head 和 advantage head：
@@ -494,7 +497,7 @@ DQN 训练好后对同一个状态通常输出同一个 greedy 动作；策略�
 策略梯度把“提高好动作概率、降低坏动作概率”写成可反向传播的目标。主流可用形式是：
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{s_t,a_t} \left[ \nabla_\theta\log\pi_\theta(a_t|s_t)A^{\pi}(s_t,a_t) \right], \quad A^{\pi}(s,a)=Q^{\pi}(s,a)-V^{\pi}(s).
+\nabla_\theta J(\theta) = \mathbb{E}_{s_t,a_t} \left[ \nabla_\theta\log\pi_\theta(a_t \mid s_t)A^{\pi}(s_t,a_t) \right], \quad A^{\pi}(s,a)=Q^{\pi}(s,a)-V^{\pi}(s).
 $$
 
 完整证明见 [策略梯度定理证明](#策略梯度定理证明)。那里会说明 trajectory likelihood-ratio、reward-to-go、baseline/advantage 和 discounted occupancy 形式之间的关系。
@@ -515,13 +518,13 @@ policy_loss.backward()
 梯度上升写法：
 
 $$
-\theta_{t+1}=\theta_t+\alpha\nabla_\theta\log\pi_{\theta_t}(a_t|s_t)\hat{A}_t
+\theta_{t+1}=\theta_t+\alpha\nabla_\theta\log\pi_{\theta_t}(a_t \mid s_t)\hat{A}_t
 $$
 
 梯度下降 loss 写法：
 
 $$
-\mathcal{L}_{PG}(\theta)=-\log\pi_\theta(a_t|s_t)\hat{A}_t
+\mathcal{L}_{PG}(\theta)=-\log\pi_\theta(a_t \mid s_t)\hat{A}_t
 $$
 
 ### REINFORCE
@@ -531,7 +534,7 @@ REINFORCE 是 Monte Carlo policy gradient。它用完整轨迹回报估计 $q_\p
 $$
 \mathbb{E}_{s\sim S,A\sim\pi_\theta(S)}
 \left[
-\nabla_\theta \ln\pi_\theta(A|S)q_\pi(S,A)
+\nabla_\theta \ln\pi_\theta(A \mid S)q_\pi(S,A)
 \right]
 $$
 
@@ -539,23 +542,23 @@ $$
 
 1. 按当前策略 $\pi_\theta$ 采样一条 episode：
 
-$$
-\lbrace s_0, a_0, r_1, \dots, s_{T-1}, a_{T-1}, r_T\rbrace
-$$
+   $$
+   \lbrace s_0, a_0, r_1, \dots, s_{T-1}, a_{T-1}, r_T\rbrace
+   $$
 
 2. 从后往前计算每个时刻的 return：
 
-```python
-            for reward in reversed(rewards):
-                G = reward + gamma * G
-                returns.insert(0, G)
-```
+   ```python
+               for reward in reversed(rewards):
+                   G = reward + gamma * G
+                   returns.insert(0, G)
+   ```
 
 3. 用 $q_t(s_t,a_t)=\sum_{k=t+1}^{T}\gamma^{k-t-1}r_k$ 更新策略：
 
-$$
-\theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t|s_t)q_t(s_t,a_t)
-$$
+   $$
+   \theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t \mid s_t)q_t(s_t,a_t)
+   $$
 
 REINFORCE 是 on-policy：采样必须来自当前策略。策略一更新，旧 episode 的分布就不再严格匹配。它的主要问题是高方差，因为 $G_t$ 包含从 $t$ 到 episode 结束的所有随机性。
 
@@ -577,16 +580,16 @@ REINFORCE 是 on-policy：采样必须来自当前策略。策略一更新，旧
 Baseline 的目标是降低方差而不改变梯度期望：
 
 $$
-\mathbb{E}_{s\sim d^{\pi},A\sim\pi_\theta(\cdot|S)}
+\mathbb{E}_{s\sim d^{\pi},A\sim\pi_\theta(\cdot \mid S)}
 \left[
-\nabla_\theta \ln\pi_\theta(A|S)(q_\pi(S,A)-b(S))
+\nabla_\theta \ln\pi_\theta(A \mid S)(q_\pi(S,A)-b(S))
 \right]
 $$
 
 baseline 项期望为 0：
 
 $$
-\mathbb{E}_{s\sim S,A\sim\pi_\theta(S)} \left[ \nabla_\theta \ln\pi_\theta(A|S)b(S) \right] =0
+\mathbb{E}_{s\sim S,A\sim\pi_\theta(S)} \left[ \nabla_\theta \ln\pi_\theta(A \mid S)b(S) \right] =0
 $$
 
 理论最优 baseline 需要最小化梯度估计方差，实践中通常取 state value：
@@ -598,7 +601,7 @@ $$
 用 MC return $g_t$ 近似 $q_t$ 时，策略更新为：
 
 $$
-\theta_{t+1} = \theta_t+\alpha\nabla_\theta\ln\pi_{\theta_t}(a_t|s_t) \left(q_t(s_t,a_t)-v_\phi(s_t)\right)
+\theta_{t+1} = \theta_t+\alpha\nabla_\theta\ln\pi_{\theta_t}(a_t \mid s_t) \left(q_t(s_t,a_t)-v_\phi(s_t)\right)
 $$
 
 价值网络训练：
@@ -625,14 +628,14 @@ $$
 
 Q Actor-Critic 用一个 critic 近似 $q(s,a,w)$，再把它作为 actor 的策略梯度权重。每个时间步：
 
-1. 按 $\pi_\theta(a|s_t)$ 生成 $a_t$。
+1. 按 $\pi_\theta(a \mid s_t)$ 生成 $a_t$。
 2. 观察 $r_{t+1},s_{t+1}$。
-3. 再按 $\pi_\theta(a|s_{t+1})$ 生成 $a_{t+1}$。
+3. 再按 $\pi_\theta(a \mid s_{t+1})$ 生成 $a_{t+1}$。
 
 Actor 更新：
 
 $$
-\theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t|s_t)q(s_t,a_t, w_t)
+\theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t \mid s_t)q(s_t,a_t, w_t)
 $$
 
 Critic 用 TD 方式更新 action value：
@@ -648,7 +651,7 @@ QAC 的问题是需要维护 action-value critic；动作空间大或连续时�
 A2C 把 actor 的权重从 $q_t(s_t,a_t)$ 改成 advantage：
 
 $$
-\theta_{t+1} = \theta_t+\alpha\nabla_\theta\ln\pi_{\theta_t}(a_t|s_t) \left[q_t(s_t,a_t)-v_t(s_t)\right]
+\theta_{t+1} = \theta_t+\alpha\nabla_\theta\ln\pi_{\theta_t}(a_t \mid s_t) \left[q_t(s_t,a_t)-v_t(s_t)\right]
 $$
 
 其中 $\delta_t(s_t,a_t)=q_t(s_t,a_t)-v_t(s_t)$ 是优势函数。优势可以用 TD error 估计：
@@ -660,27 +663,29 @@ $$
 这个等价关系来自：
 
 $$
-q_\pi(s_t,a_t) - v_\pi(s_t) = \mathbb{E}[R_{t+1} + \gamma v_\pi(S_{t+1}) - v_\pi(S_t)|S_t=s_t,A_t=a_t]
+q_\pi(s_t,a_t) - v_\pi(s_t) = \mathbb{E}[R_{t+1} + \gamma v_\pi(S_{t+1}) - v_\pi(S_t) \mid S_t=s_t,A_t=a_t]
 $$
 
 这样就不需要同时维护 action-value network 和 state-value baseline network；一个 state-value critic 就能给 actor 提供 TD advantage。
 
 实现流程：
 
-1. 按 $\pi_\theta(a|s_t)$ 生成 $a_t$，观察 $r_{t+1},s_{t+1}$。
+1. 按 $\pi_\theta(a \mid s_t)$ 生成 $a_t$，观察 $r_{t+1},s_{t+1}$。
 2. 估计 TD error：
 
-$$
-\delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)
-$$
+   $$
+   \delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)
+   $$
 
 3. Actor 使用：
 
-$$
--\delta_t\log\pi_\theta(a_t|s_t)
-$$
+   $$
+   -\delta_t\log\pi_\theta(a_t \mid s_t)
+   $$
 
 4. Critic 使用 $\delta_t^2$ 或等价的 value target loss。
+
+对应代码示意：
 
 ```python
         # TD Error
@@ -703,23 +708,23 @@ Off-policy actor-critic 允许 behavior policy $\beta$ 采样，target policy $\
 
 $$
 \nabla_\theta J(\theta) =
-\mathbb{E}_{S\sim\rho, A\sim\beta(\cdot|S)}
+\mathbb{E}_{S\sim\rho, A\sim\beta(\cdot \mid S)}
 \left[
-\frac{\pi_\theta(A|S)}{\beta(A|S)}
-\nabla_\theta\ln\pi_\theta(A|S)q_\pi(S,A)
+\frac{\pi_\theta(A \mid S)}{\beta(A \mid S)}
+\nabla_\theta\ln\pi_\theta(A \mid S)q_\pi(S,A)
 \right]
 $$
 
 其中 off-policy state distribution 为：
 
 $$
-\rho(s)=\sum_{s'\in\mathcal{S}}d_\beta(s')Pr_\pi(s|s')
+\rho(s)=\sum_{s'\in\mathcal{S}}d_\beta(s')Pr_\pi(s \mid s')
 $$
 
 其中：
 
 $$
-Pr_\pi(s|s')
+Pr_\pi(s \mid s')
 $$
 
 是 discounted total transition probability。
@@ -728,34 +733,34 @@ $$
 
 $$
 \nabla_\theta J(\theta) =
-\mathbb{E}_{S\sim\rho, A\sim\beta(\cdot|S)}
+\mathbb{E}_{S\sim\rho, A\sim\beta(\cdot \mid S)}
 \left[
-\frac{\pi_\theta(A|S)}{\beta(A|S)}
-\nabla_\theta\ln\pi_\theta(A|S)(q_\pi(S,A)-v_\pi(S))
+\frac{\pi_\theta(A \mid S)}{\beta(A \mid S)}
+\nabla_\theta\ln\pi_\theta(A \mid S)(q_\pi(S,A)-v_\pi(S))
 \right]
 $$
 
 实现上，给定 behavior policy：
 
 $$
-\beta(a|s)
+\beta(a \mid s)
 $$
 
-1. 用 $\beta(a|s_t)$ 采样 $a_t$，观察 $r_{t+1},s_{t+1}$。
+1. 用 $\beta(a \mid s_t)$ 采样 $a_t$，观察 $r_{t+1},s_{t+1}$。
 2. 用 $\delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)$ 估计 advantage。
 3. Actor loss 使用 importance ratio：
 
-$$
--\frac{\pi_\theta(a_t|s_t)}{\beta(a_t|s_t)}\delta_t\log\pi_\theta(a_t|s_t)
-$$
+   $$
+   -\frac{\pi_\theta(a_t \mid s_t)}{\beta(a_t \mid s_t)}\delta_t\log\pi_\theta(a_t \mid s_t)
+   $$
 
 4. Critic 也可以用 importance ratio 加权 TD 更新：
 
-$$
-w_{t+1}=w_t+\alpha_w
-\frac{\pi_\theta(a_t|s_t)}{\beta(a_t|s_t)}
-\delta_t\nabla_w v(s_t,w_t)
-$$
+   $$
+   w_{t+1}=w_t+\alpha_w
+   \frac{\pi_\theta(a_t \mid s_t)}{\beta(a_t \mid s_t)}
+   \delta_t\nabla_w v(s_t,w_t)
+   $$
 
 ### Modern algorithms
 
@@ -771,7 +776,7 @@ $$
 \max_\theta
 \mathbb{E}_{s\sim\rho_{\theta_{old}},a\sim\pi_{\theta_{old}}}
 \left[
-\frac{\pi_\theta(a|s)}{\pi_{\theta_{old}}(a|s)}
+\frac{\pi_\theta(a \mid s)}{\pi_{\theta_{old}}(a \mid s)}
 A_{\theta_{old}}(s,a)
 \right]
 $$
@@ -780,7 +785,7 @@ $$
 \text{s.t.}\quad
 \mathbb{E}_{s\sim\rho_{\theta_{old}}}
 \left[
-D_{KL}\left(\pi_{\theta_{old}}(\cdot|s) \Vert \pi_\theta(\cdot|s)\right)
+D_{KL}\left(\pi_{\theta_{old}}(\cdot \mid s) \Vert \pi_\theta(\cdot \mid s)\right)
 \right]\le\delta.
 $$
 
@@ -817,13 +822,13 @@ PPO 的 clipped surrogate 是 TRPO 思想的一阶工程替代：不再显式求
 
 $$
 J_{PPO}(\theta) = \mathbb{E}[\min(r_t(\theta) A_t, clip(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t)] \\
-r_t(\theta) = \frac{\pi_{\theta}(a|s)}{\pi_{old}(a|s)} = \exp(\log\pi_{\theta}(a|s) - \log\pi_{old}(a|s))
+r_t(\theta) = \frac{\pi_{\theta}(a \mid s)}{\pi_{old}(a \mid s)} = \exp(\log\pi_{\theta}(a \mid s) - \log\pi_{old}(a \mid s))
 $$
 
 ##### 目标函数：LLM token-level 版本
 
 $$
-J_{PPO}(\theta) = \mathbb{E}_{q\sim \mathcal{D},o_i\sim \pi_{old}(\cdot|q)}[\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]
+J_{PPO}(\theta) = \mathbb{E}_{q\sim \mathcal{D},o_i\sim \pi_{old}(\cdot \mid q)}[\frac{1}{\lvert o_i\rvert}\sum_{t=1}^{\lvert o_i\rvert}\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]
 $$
 
 其中 $o$ 代表模型生成的一条序列， $o_i$ 代表第 $i$ 条序列， $o_{i,t}$ 代表第 $i$ 条序列的第 $t$ 个 token。先对一条序列的每个 token 计算优势并累加，再除以序列长度进行归一化，这是防止长序列优势累加过大，在优化时过度重视长序列。
@@ -833,7 +838,7 @@ $$
 Token 级优势和 ratio 分别是：
 
 $$
-\hat A_{i,t} \quad\text{and}\quad r_{i,t} = \frac{\pi_\theta(o_{i,t}|q,o_{i,\lt t})} {\pi_{old}(o_{i,t}|q,o_{i,\lt t})}.
+\hat A_{i,t} \quad\text{and}\quad r_{i,t} = \frac{\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})} {\pi_{old}(o_{i,t} \mid q,o_{i,\lt t})}.
 $$
 
 $\hat A_{i,t}$ 由奖励模型与批判模型共同计算，衡量第 $t$ 个 token 对最终回报的贡献差异； $r_{i,t}\gt1$ 表示新策略相对旧策略更倾向于输出该 token，反之则说明新策略正在降低该 token 的概率。
@@ -899,7 +904,7 @@ for each episode, implement below:
 1. collect a rollout:
 
    $$
-   \lbrace s_t, a_t, \pi_\theta(a_t|s_t), s_{t+1}\rbrace
+   \lbrace s_t, a_t, \pi_\theta(a_t \mid s_t), s_{t+1}\rbrace
    $$
 
    for a given number of steps, 行为策略 $\pi_\theta$ update after each episode
@@ -912,12 +917,12 @@ for each episode, implement below:
 
 3. for each ppo epoch (model update after each epoch)
 
-   - 用新策略评估旧数据 evaluate rollout by updated model, 得到 $\pi_\theta(a_t|s_t), v_\theta(s_t), H(\theta)$
+   - 用新策略评估旧数据 evaluate rollout by updated model, 得到 $\pi_\theta(a_t \mid s_t), v_\theta(s_t), H(\theta)$
    - 计算 ppo clip loss
-   - $r_t(\theta) = \frac{\pi_{\theta}(a_t|s_t)}{\pi_{old}(a_t|s_t)} = \exp(\log\pi_{\theta}(a_t|s_t) - \log\pi_{old}(a_t|s_t))$
+   - $r_t(\theta) = \frac{\pi_{\theta}(a_t \mid s_t)}{\pi_{old}(a_t \mid s_t)} = \exp(\log\pi_{\theta}(a_t \mid s_t) - \log\pi_{old}(a_t \mid s_t))$
    - policy loss $-\min(r_t(\theta)A_t, clip(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t)$
    - value loss $(v_\theta(s_t) - q(s_t,a_t))^{2}$
-   - entropy bonus $H(\pi_\theta) = -\mathbb{E}[\sum_a \pi_\theta(a|s_t)\log\pi_\theta(a|s_t)]$
+   - entropy bonus $H(\pi_\theta) = -\mathbb{E}[\sum_a \pi_\theta(a \mid s_t)\log\pi_\theta(a \mid s_t)]$
    - total loss = policy loss + value loss - entropy bonus
    - 总结：同一批经验不要只用一次，可以多学几轮；但是每学一轮都要检查新策略相对旧策略变了多少。如果变化还小，就继续学习；如果某些动作的概率被推得太高或压得太低，就把这部分更新截住
    - 参考：https://zhuanlan.zhihu.com/p/614115887
@@ -928,14 +933,14 @@ for each episode, implement below:
 
 ##### 目标与对象定义
 
-- 对于模型 $\pi_\theta$ 给定一个问题 $q$ 采样多个回答 $\lbrace o_i \rbrace_{i=1}^{G}$， $G$ 是 group 数量，每个回答有不同的长度 $|o_i|$
-- $\pi_\theta(o_{i,t}|q, o_{i,\lt t})$ 是在 $q$ 的采样解答 $o_{i,t}$ 解码的第 $t$ 个词元的策略概率
+- 对于模型 $\pi_\theta$ 给定一个问题 $q$ 采样多个回答 $\lbrace o_i \rbrace_{i=1}^{G}$， $G$ 是 group 数量，每个回答有不同的长度 $\lvert o_i\rvert$
+- $\pi_\theta(o_{i,t} \mid q, o_{i,\lt t})$ 是在 $q$ 的采样解答 $o_{i,t}$ 解码的第 $t$ 个词元的策略概率
 - KL 约束 $\pi_\theta$ 和 $\pi_{ref}$ 分布差异，使用 k3 估计（无偏 & 方差小）
 
 ##### K3 estimator
 
 $$
-D_{KL}[\pi_\theta \Vert \pi_{ref}] = \frac{\pi_{ref}(o_{i,t}|q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t}|q,o_{i,\lt t})} - \log \frac{\pi_{ref}(o_{i,t}|q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t}|q,o_{i,\lt t})} - 1
+D_{KL}[\pi_\theta \Vert \pi_{ref}] = \frac{\pi_{ref}(o_{i,t} \mid q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t} \mid q,o_{i,\lt t})} - \log \frac{\pi_{ref}(o_{i,t} \mid q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t} \mid q,o_{i,\lt t})} - 1
 $$
 
 ##### Group relative advantage
@@ -947,7 +952,7 @@ $$
 $$
 
 $$
-\mathcal{L}_{GRPO}(\theta) = \mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot|q)}[\frac{1}{G} \sum_{i=1}^{G} \frac{1}{|o_i|} \sum_{t=1}^{|o_i|}[\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]]
+\mathcal{L}_{GRPO}(\theta) = \mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot \mid q)}[\frac{1}{G} \sum_{i=1}^{G} \frac{1}{\lvert o_i\rvert} \sum_{t=1}^{\lvert o_i\rvert}[\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]]
 $$
 
 ##### 与 PPO 的差异
@@ -999,14 +1004,14 @@ $$
 - 新旧策略的概率比值:
 
 $$
-\rho_{j,i}(\theta) = \frac{\pi_\theta(y_{j,i}|x_j)} {\pi_{old}(y_{j,i}|x_j)} = \exp\left( \log\pi_\theta(y_{j,i}|x_j)-\log\pi_{old}(y_{j,i}|x_j) \right)
+\rho_{j,i}(\theta) = \frac{\pi_\theta(y_{j,i} \mid x_j)} {\pi_{old}(y_{j,i} \mid x_j)} = \exp\left( \log\pi_\theta(y_{j,i} \mid x_j)-\log\pi_{old}(y_{j,i} \mid x_j) \right)
 $$
 
 - PPO 的裁剪机制 advantages $\hat{A}_{j,i}$ 来自组内比较，替代 Critic (PPO)
 - GRPO uses the k3 estimator for KL divergence:
 
 $$
-\hat D_{KL} = \exp(\Delta)-\Delta-1, \quad \Delta=\log\pi_{ref}(y|x)-\log\pi_\theta(y|x).
+\hat D_{KL} = \exp(\Delta)-\Delta-1, \quad \Delta=\log\pi_{ref}(y \mid x)-\log\pi_\theta(y \mid x).
 $$
 
 ```python
@@ -1049,15 +1054,15 @@ $$
 ##### 目标函数
 
 $$
-\mathcal{L}_{DAPO}(\theta) = -\mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot|q)}
+\mathcal{L}_{DAPO}(\theta) = -\mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot \mid q)}
 \left[
-\frac{1}{\sum_{i=1}^{G} |o_i|}
-\sum_{i=1}^{G} \sum_{t=1}^{|o_i|}
+\frac{1}{\sum_{i=1}^{G} \lvert o_i\rvert}
+\sum_{i=1}^{G} \sum_{t=1}^{\lvert o_i\rvert}
 \min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon_{low}, 1+\epsilon_{high})\hat{A}_{i,t})
 \right]
 $$
 
-其中 $r_{i,t}=\frac{\pi_\theta(o_{i,t}|q,o_{i,\lt t})}{\pi_{old}(o_{i,t}|q,o_{i,\lt t})}$。DAPO 论文的核心改动是 Clip-Higher、动态采样、token-level policy gradient loss 和 overlong reward shaping；它移除了显式 KL penalty。
+其中 $r_{i,t}=\frac{\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})}{\pi_{old}(o_{i,t} \mid q,o_{i,\lt t})}$。DAPO 论文的核心改动是 Clip-Higher、动态采样、token-level policy gradient loss 和 overlong reward shaping；它移除了显式 KL penalty。
 
 ```python
     # DAPO 仍然可以使用 response-level/group-level advantage，
@@ -1076,7 +1081,7 @@ $$
 s.t.
 
 $$
-0 \lt |\lbrace o_i \mid \text{equivalent}(a, o_i)\rbrace| \lt G
+0 \lt \lvert\lbrace o_i \mid \text{equivalent}(a, o_i)\rbrace\rvert \lt G
 $$
 
 ##### 关键改动
@@ -1107,7 +1112,7 @@ DAPO 的优化角度可以拆成四个分支：Clip-Higher、动态采样、toke
 
 动机：GRPO 训练中常见的一个工程问题：回答长度失控。模型可能学会"写得越多越好"（因为更长的回答更容易包含正确推理），导致生成 2000+ token 的冗长回答。GRPO 的原始做法是设定最大长度，超过就截断并给惩罚。但截断是硬边界，回答 499 token 没事，501 token 就被惩罚，梯度信号不连续。截断样本的不当奖励塑造（一般提取不到答案，所以Reward为-1）会引入奖励噪声，并严重扰乱训练过程。因为一个合理的推理过程可能仅因长度过长而受到惩罚，使模型对其推理过程的有效性产生困惑
 
-- 方案：DAPO 提出了一种基于长度的惩罚机制——软过长惩罚（Soft Overlong Punishment），用一个平滑的长度惩罚函数替代硬截断，让模型自然地学会控制回答长度。具体来说，当响应长度超过预设的最大值时，定义一个惩罚区间。在区间内，响应越长，受到的惩罚越大。该惩罚将被添加到原始的基于规则的正确性奖励中，从而引导模型避免生成过长的响应。论文中，预期的最大长度设为 16384 个 Token，并额外分配 4096 个 Token 作为软惩罚缓冲区。因此，生成的最大 Token 数被设定为 20480 个。软过长惩罚具体做法：预期长度之内，惩罚为0；缓冲区内，惩罚 $\frac{(L_{max} - L_{cache}) - |y|}{L_{cache}}$ 随长度增加惩罚线形从0加重至-1；超过最大长度，惩罚为-1
+- 方案：DAPO 提出了一种基于长度的惩罚机制——软过长惩罚（Soft Overlong Punishment），用一个平滑的长度惩罚函数替代硬截断，让模型自然地学会控制回答长度。具体来说，当响应长度超过预设的最大值时，定义一个惩罚区间。在区间内，响应越长，受到的惩罚越大。该惩罚将被添加到原始的基于规则的正确性奖励中，从而引导模型避免生成过长的响应。论文中，预期的最大长度设为 16384 个 Token，并额外分配 4096 个 Token 作为软惩罚缓冲区。因此，生成的最大 Token 数被设定为 20480 个。软过长惩罚具体做法：预期长度之内，惩罚为0；缓冲区内，惩罚 $\frac{(L_{max} - L_{cache}) - \lvert y\rvert}{L_{cache}}$ 随长度增加惩罚线形从0加重至-1；超过最大长度，惩罚为-1
 - KL散度项移除：在训练长思维链推理模型时，策略模型分布（actor model）可能与初始模型（reference model）显著偏离，即“Base 到 LongCoT 本来变化大”。因此这种限制是没有必要的
 - 参考：
 - https://zhuanlan.zhihu.com/p/1899235750018541074
@@ -1127,11 +1132,11 @@ CISPO (Clipped IS-weight Policy Optimization) 不再像 PPO/GRPO 那样通过 `m
 
 $$
 J_{\text{REINFORCE}}(\theta)=
-\mathbb{E}_{(q,a)\sim\mathcal{D},o_i\sim\pi_{\theta_{old}}(\cdot|q)}
+\mathbb{E}_{(q,a)\sim\mathcal{D},o_i\sim\pi_{\theta_{old}}(\cdot \mid q)}
 \left[
-\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}
+\frac{1}{\lvert o_i\rvert}\sum_{t=1}^{\lvert o_i\rvert}
 sg(r_{i,t}(\theta))\hat{A}_{i,t}
-\log\pi_\theta(o_{i,t}|q,o_{i,\lt t})
+\log\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})
 \right],
 $$
 
@@ -1139,20 +1144,20 @@ $$
 
 $$
 r_{i,t}(\theta)=
-\frac{\pi_\theta(o_{i,t}|q,o_{i,\lt t})}
-{\pi_{\theta_{old}}(o_{i,t}|q,o_{i,\lt t})}.
+\frac{\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})}
+{\pi_{\theta_{old}}(o_{i,t} \mid q,o_{i,\lt t})}.
 $$
 
 CISPO 在这个形式上引入 clipped IS weight，并采用 GRPO 的 group relative advantage 与 DAPO 的 token-level loss：
 
 $$
 J_{CISPO}(\theta) =
-\mathbb{E}_{(q,a)\sim \mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim \pi_{\theta_{old}}(\cdot|q)}
+\mathbb{E}_{(q,a)\sim \mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim \pi_{\theta_{old}}(\cdot \mid q)}
 \left[
-\frac{1}{\sum_{i=1}^{G}|o_i|}
-\sum_{i=1}^{G}\sum_{t=1}^{|o_i|}
+\frac{1}{\sum_{i=1}^{G}\lvert o_i\rvert}
+\sum_{i=1}^{G}\sum_{t=1}^{\lvert o_i\rvert}
 sg(\hat{r}_{i,t}(\theta))\hat{A}_{i,t}
-\log \pi_\theta(o_{i,t}|q,o_{i,\lt t})
+\log \pi_\theta(o_{i,t} \mid q,o_{i,\lt t})
 \right],
 $$
 
@@ -1194,10 +1199,10 @@ MiniMax-M1 还给出一个带 token-wise mask 的统一写法，用来表示“�
 $$
 J_{\text{unify}}(\theta)=
 \mathbb{E}\left[
-\frac{1}{\sum_i |o_i|}
+\frac{1}{\sum_i \lvert o_i\rvert}
 \sum_i\sum_t
 sg(\hat r_{i,t})\hat A_{i,t}
-\log\pi_\theta(o_{i,t}|q,o_{i,\lt t})M_{i,t}
+\log\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})M_{i,t}
 \right]
 $$
 
@@ -1231,8 +1236,8 @@ $$
 sequence-level ratio 使用长度归一化的 sequence likelihood ratio：
 
 $$
-s_i(\theta)=\exp\left(\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}
-\log\frac{\pi_\theta(o_{i,t}|q,o_{i,\lt t})}{\pi_{old}(o_{i,t}|q,o_{i,\lt t})}\right)
+s_i(\theta)=\exp\left(\frac{1}{\lvert o_i\rvert}\sum_{t=1}^{\lvert o_i\rvert}
+\log\frac{\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})}{\pi_{old}(o_{i,t} \mid q,o_{i,\lt t})}\right)
 $$
 
 $$
@@ -1244,7 +1249,7 @@ $$
 
 ##### 长度归一化与代码实现
 
-为什么要做长度归一化：完整 sequence likelihood 是所有 token 概率的乘积，长度越长越容易产生极端 ratio；取 $1/|o_i|$ 的几何平均后，不同长度 response 可以共享同一数量级的 clip range。
+为什么要做长度归一化：完整 sequence likelihood 是所有 token 概率的乘积，长度越长越容易产生极端 ratio；取 $1/\lvert o_i\rvert$ 的几何平均后，不同长度 response 可以共享同一数量级的 clip range。
 
 ```python
     # token_log_ratio: [batch_responses, max_response_len]
@@ -1272,8 +1277,8 @@ $$
 \mathbb{E}\left[
 \frac{1}{G}\sum_{i=1}^{G}
 s_i(\theta)\hat A_i
-\frac{1}{|y_i|}\sum_{t=1}^{|y_i|}
-\nabla_\theta \log\pi_\theta(y_{i,t}|x,y_{i,\lt t})
+\frac{1}{\lvert y_i\rvert}\sum_{t=1}^{\lvert y_i\rvert}
+\nabla_\theta \log\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})
 \right].
 $$
 
@@ -1283,9 +1288,9 @@ $$
 \nabla_\theta J_{GRPO}(\theta)=
 \mathbb{E}\left[
 \frac{1}{G}\sum_{i=1}^{G}\hat A_i
-\frac{1}{|y_i|}\sum_{t=1}^{|y_i|}
-\frac{\pi_\theta(y_{i,t}|x,y_{i,\lt t})}{\pi_{\theta_{old}}(y_{i,t}|x,y_{i,\lt t})}
-\nabla_\theta \log\pi_\theta(y_{i,t}|x,y_{i,\lt t})
+\frac{1}{\lvert y_i\rvert}\sum_{t=1}^{\lvert y_i\rvert}
+\frac{\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})}{\pi_{\theta_{old}}(y_{i,t} \mid x,y_{i,\lt t})}
+\nabla_\theta \log\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})
 \right].
 $$
 
@@ -1297,8 +1302,8 @@ $$
 
 $$
 s_{i,t}(\theta)=sg[s_i(\theta)]\cdot
-\frac{\pi_\theta(y_{i,t}|x,y_{i,\lt t})}
-{sg[\pi_\theta(y_{i,t}|x,y_{i,\lt t})]}.
+\frac{\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})}
+{sg[\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})]}.
 $$
 
 数值上 $s_{i,t}=s_i$，但梯度来自当前 token 的 logprob；当一条 response 内所有 token 共享同一个 $\hat A_i$ 时，GSPO-token 与 GSPO 在目标、clip 条件和理论梯度上等价。它的价值在于：如果未来有 step-level 或 token-level advantage，可以在不回到 GRPO token ratio 的情况下加入细粒度 credit assignment。
@@ -1354,7 +1359,7 @@ $$
 给定 prompt $x$ 根据人类偏好标注得到回答 $y_1 \succ y_2$，构建偏好数据集 $\mathcal{D} = \lbrace x^{(i)}, y_w^{(i)}, y_l^{(i)}\rbrace_{i=1}^{N}$，reward 模型需要预测出分数 $r^{\ast}(y, x)$。通过 BT 模型建模人类偏好分布：
 
 $$
-p^{\ast}(y_1 \succ y_2|x) = \frac{e^{r^{\ast}(x, y_1)}}{e^{r^{\ast}(x, y_1)} + e^{r^{\ast}(x, y_2)}} = \frac{1}{1 + e^{-(r^{\ast}(x, y_1) - r^{\ast}(x, y_2))}} = \sigma(r^{\ast}(x, y_1) - r^{\ast}(x, y_2))
+p^{\ast}(y_1 \succ y_2 \mid x) = \frac{e^{r^{\ast}(x, y_1)}}{e^{r^{\ast}(x, y_1)} + e^{r^{\ast}(x, y_2)}} = \frac{1}{1 + e^{-(r^{\ast}(x, y_1) - r^{\ast}(x, y_2))}} = \sigma(r^{\ast}(x, y_1) - r^{\ast}(x, y_2))
 $$
 
 MLE loss:
@@ -1392,13 +1397,13 @@ $$
 ##### SFT 目标
 
 $$
-\mathcal{L}_{SFT} = -\mathbb{E}_{(x,y)\sim\mathcal{D}}[\log\pi_\theta(y|x)] \approx -\sum_{t=1}^{T} \log\pi_\theta(y_t|x,y_{\lt t})
+\mathcal{L}_{SFT} = -\mathbb{E}_{(x,y)\sim\mathcal{D}}[\log\pi_\theta(y \mid x)] \approx -\sum_{t=1}^{T} \log\pi_\theta(y_t \mid x,y_{\lt t})
 $$
 
 ##### RLHF 目标
 
 $$
-\mathcal{J}_{RLHF} = \mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(\cdot|x)}[r_\phi(x,y)] - \beta D_{KL}(\pi_\theta(\cdot|x) \Vert \pi_{ref}(\cdot|x))
+\mathcal{J}_{RLHF} = \mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(\cdot \mid x)}[r_\phi(x,y)] - \beta D_{KL}(\pi_\theta(\cdot \mid x) \Vert \pi_{ref}(\cdot \mid x))
 $$
 
 解释：让当前模型自己生成回答，用 RM 打分，再用 PPO 提高高分回答的概率，追求偏好奖励，同时别偏离 SFT 太远，用裁剪、优势估计和 KL 约束（k2 estimation）来稳定更新。
@@ -1409,8 +1414,8 @@ Reward Model 往往只在完整回答 $y$ 结束后给一个分数 $r(x,y)$，�
 
 $$
 \begin{aligned}
-r_t^{token} &= -\beta(\log\pi_\theta(y_t|s_t) - \log\pi_{ref}(y_t|s_t)), \quad t \lt T \\
-&= r_\phi(x,y) - \beta(\log\pi_\theta(y_t|s_t) - \log\pi_{ref}(y_t|s_t)), \quad t = T
+r_t^{token} &= -\beta(\log\pi_\theta(y_t \mid s_t) - \log\pi_{ref}(y_t \mid s_t)), \quad t \lt T \\
+&= r_\phi(x,y) - \beta(\log\pi_\theta(y_t \mid s_t) - \log\pi_{ref}(y_t \mid s_t)), \quad t = T
 \end{aligned}
 $$
 
@@ -1426,7 +1431,7 @@ $$
 ##### 目标函数
 
 $$
-\mathcal{L}_{DPO}(\pi_\theta;\pi_{ref}) = -\mathbb{E}_{x,y_w,y_l\sim \mathcal{D}}[\log \sigma(\beta\log\frac{\pi_\theta(y_w|x)}{\pi_{ref}(y_w|x)} - \beta\log\frac{\pi_\theta(y_l|x)}{\pi_{ref}(y_l|x)})]
+\mathcal{L}_{DPO}(\pi_\theta;\pi_{ref}) = -\mathbb{E}_{x,y_w,y_l\sim \mathcal{D}}[\log \sigma(\beta\log\frac{\pi_\theta(y_w \mid x)}{\pi_{ref}(y_w \mid x)} - \beta\log\frac{\pi_\theta(y_l \mid x)}{\pi_{ref}(y_l \mid x)})]
 $$
 
 ```python
@@ -1451,40 +1456,40 @@ $$
 
 $$
 \begin{aligned}
-\max_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(\cdot|x)}&[r_\phi(x,y)] - \beta D_{KL}(\pi_\theta(\cdot|x) \Vert \pi_{ref}(\cdot|x)) \\
-&= \max_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y|x)}[r(x,y) - \beta \log\frac{\pi_\theta(y|x)}{\pi_{ref}(y|x)}] \\
-&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y|x)}[\log\frac{\pi_\theta(y|x)}{\pi_{ref}(y|x)} - \frac{1}{\beta}r(x,y)] \\
-&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y|x)}[\log\frac{\pi_\theta(y|x)}{\pi_{ref}(y|x)} - \log\frac{1}{Z(x)} + \log\frac{1}{Z(x)} - \log e^{ \frac{1}{\beta}r(x,y)} + \log e^{ \frac{1}{\beta}r(x,y)} - \frac{1}{\beta}r(x,y)] \\
-&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y|x)}[\log\frac{\pi_\theta(y|x)}{\frac{1}{Z(x)}\pi_{ref}(y|x)e^{\frac{1}{\beta}r(x,y)}} + \log\frac{1}{Z(x)}] \\
-&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y|x)}[D_{KL}(\pi(y|x) \Vert \pi^{\ast}(y|x)) - \log Z(x)]
+\max_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(\cdot \mid x)}&[r_\phi(x,y)] - \beta D_{KL}(\pi_\theta(\cdot \mid x) \Vert \pi_{ref}(\cdot \mid x)) \\
+&= \max_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y \mid x)}[r(x,y) - \beta \log\frac{\pi_\theta(y \mid x)}{\pi_{ref}(y \mid x)}] \\
+&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y \mid x)}[\log\frac{\pi_\theta(y \mid x)}{\pi_{ref}(y \mid x)} - \frac{1}{\beta}r(x,y)] \\
+&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y \mid x)}[\log\frac{\pi_\theta(y \mid x)}{\pi_{ref}(y \mid x)} - \log\frac{1}{Z(x)} + \log\frac{1}{Z(x)} - \log e^{ \frac{1}{\beta}r(x,y)} + \log e^{ \frac{1}{\beta}r(x,y)} - \frac{1}{\beta}r(x,y)] \\
+&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y \mid x)}[\log\frac{\pi_\theta(y \mid x)}{\frac{1}{Z(x)}\pi_{ref}(y \mid x)e^{\frac{1}{\beta}r(x,y)}} + \log\frac{1}{Z(x)}] \\
+&= \min_\theta\mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(y \mid x)}[D_{KL}(\pi(y \mid x) \Vert \pi^{\ast}(y \mid x)) - \log Z(x)]
 \end{aligned}
 $$
 
 ##### 推导动机
 
-找到一个配分函数 $Z(x) = \sum_y \pi_{ref}(y|x)e^{\frac{1}{\beta}r(x,y)}$ 作为一个有效的概率分布的归一化系数：
+找到一个配分函数 $Z(x) = \sum_y \pi_{ref}(y \mid x)e^{\frac{1}{\beta}r(x,y)}$ 作为一个有效的概率分布的归一化系数：
 
 $$
-\pi^{\ast}(y|x) = \frac{1}{Z(x)} \pi_{ref}(y|x)e^{\frac{1}{\beta}r(x,y)}
+\pi^{\ast}(y \mid x) = \frac{1}{Z(x)} \pi_{ref}(y \mid x)e^{\frac{1}{\beta}r(x,y)}
 $$
 
-这样使得目标的第一项 $\log$ 的分母是一个有效的概率分布，将优化目标表达成 KL 散度。奖励函数 RM 可以用策略概率的比值来表示，不需要额外的 RM，策略模型自己就蕴含了奖励信号。推导结果：最小化 KL 项，得到求解策略 $\pi_\theta(y|x) = \pi^{\ast}(y|x)$。
+这样使得目标的第一项 $\log$ 的分母是一个有效的概率分布，将优化目标表达成 KL 散度。奖励函数 RM 可以用策略概率的比值来表示，不需要额外的 RM，策略模型自己就蕴含了奖励信号。推导结果：最小化 KL 项，得到求解策略 $\pi_\theta(y \mid x) = \pi^{\ast}(y \mid x)$。
 
-替代目标中的奖励函数 $r(x,y) = \beta\log\frac{\pi^{\ast}(y|x)}{\pi_{ref}(y|x)} + \beta \log Z(x)$ 带入 BT model：
+替代目标中的奖励函数 $r(x,y) = \beta\log\frac{\pi^{\ast}(y \mid x)}{\pi_{ref}(y \mid x)} + \beta \log Z(x)$ 带入 BT model：
 
 $$
 \begin{aligned}
-p^{\ast}(y_1 \succ y_2|x) &= \frac{e^{r^{\ast}(x, y_1)}}{e^{r^{\ast}(x, y_1)} + e^{r^{\ast}(x, y_2)}} = \sigma(r^{\ast}(x, y_1) - r^{\ast}(x, y_2)) \\
-&= \sigma(\beta \log\frac{\pi^{\ast}(y_1|x)}{\pi_{ref}(y_1|x)} - \beta \log\frac{\pi^{\ast}(y_2|x)}{\pi_{ref}(y_2|x)})
+p^{\ast}(y_1 \succ y_2 \mid x) &= \frac{e^{r^{\ast}(x, y_1)}}{e^{r^{\ast}(x, y_1)} + e^{r^{\ast}(x, y_2)}} = \sigma(r^{\ast}(x, y_1) - r^{\ast}(x, y_2)) \\
+&= \sigma(\beta \log\frac{\pi^{\ast}(y_1 \mid x)}{\pi_{ref}(y_1 \mid x)} - \beta \log\frac{\pi^{\ast}(y_2 \mid x)}{\pi_{ref}(y_2 \mid x)})
 \end{aligned}
 $$
 
 ##### 为什么标准 RLHF(PPO) 更鲁棒？
 
-- DPO的训练目标会导致过拟合，因为 rejected token 策略 $\pi_\theta(y_l|x)$ 会快速收敛到 0，导致 DPO sigmoid 概率不断接近 1，损失一直降低，但是没有对齐偏好。解决方案可以是 IPO，它把偏好概率拟合到一个固定 margin：
+- DPO的训练目标会导致过拟合，因为 rejected token 策略 $\pi_\theta(y_l \mid x)$ 会快速收敛到 0，导致 DPO sigmoid 概率不断接近 1，损失一直降低，但是没有对齐偏好。解决方案可以是 IPO，它把偏好概率拟合到一个固定 margin：
 
 $$
-\log\frac{\pi^{\ast}(y_1|x)}{\pi_{ref}(y_1|x)} - \log\frac{\pi^{\ast}(y_2|x)}{\pi_{ref}(y_2|x)} \rightarrow \frac{\tau^{-1}}{2}
+\log\frac{\pi^{\ast}(y_1 \mid x)}{\pi_{ref}(y_1 \mid x)} - \log\frac{\pi^{\ast}(y_2 \mid x)}{\pi_{ref}(y_2 \mid x)} \rightarrow \frac{\tau^{-1}}{2}
 $$
 
 - 在DPO的推导中，最优策略是基于BT-Model形式下能得到最大的reward，在非DPO的优化中，存在其他的策略能够使得DPO Loss更低
@@ -1508,7 +1513,7 @@ $$
 SFT 的条件分布错位可以直接写成：
 
 $$
-\mathcal{L}_{SFT} =-\sum_t\log\pi_\theta(y_t^{\ast}|x,y_{\lt t}^{\ast}), \quad \text{inference: } \hat y_t\sim\pi_\theta(\cdot|x,\hat y_{\lt t}).
+\mathcal{L}_{SFT} =-\sum_t\log\pi_\theta(y_t^{\ast} \mid x,y_{\lt t}^{\ast}), \quad \text{inference: } \hat y_t\sim\pi_\theta(\cdot \mid x,\hat y_{\lt t}).
 $$
 
 训练目标从未让模型在 $\hat y_{\lt t}$ 这个“自己犯错后的状态”上恢复；一旦早期 token 偏了，后面的状态分布就不是训练分布。这也是为什么只看 teacher-forced token accuracy 不能代表真实生成质量。
@@ -1561,17 +1566,17 @@ for prompt in eval_prompts:
 状态价值从定义出发：
 
 $$
-v_\pi(s)=\mathbb{E}[G_t|S_t=s] =\mathbb{E}[R_{t+1}+\gamma G_{t+1}|S_t=s].
+v_\pi(s)=\mathbb{E}[G_t \mid S_t=s] =\mathbb{E}[R_{t+1}+\gamma G_{t+1} \mid S_t=s].
 $$
 
 即时奖励项：
 
 $$
 \begin{aligned}
-\mathbb{E}[R_{t+1}|S_t=s]
-&= \sum_r r p(r|s)\\
-&= \sum_r r\sum_a p(r|s,a)p(a|s)\\
-&= \sum_a \pi(a|s)\sum_r p(r|s,a)r.
+\mathbb{E}[R_{t+1} \mid S_t=s]
+&= \sum_r r p(r \mid s)\\
+&= \sum_r r\sum_a p(r \mid s,a)p(a \mid s)\\
+&= \sum_a \pi(a \mid s)\sum_r p(r \mid s,a)r.
 \end{aligned}
 $$
 
@@ -1579,10 +1584,10 @@ $$
 
 $$
 \begin{aligned}
-\mathbb{E}[G_{t+1}|S_t=s]
-&= \sum_{s'}\mathbb{E}[G_{t+1}|S_t=s,S_{t+1}=s']p(s'|s)\\
-&= \sum_{s'}\mathbb{E}[G_{t+1}|S_{t+1}=s']p(s'|s)\\
-&= \sum_{s'}v_\pi(s')\sum_a\pi(a|s)p(s'|s,a).
+\mathbb{E}[G_{t+1} \mid S_t=s]
+&= \sum_{s'}\mathbb{E}[G_{t+1} \mid S_t=s,S_{t+1}=s']p(s' \mid s)\\
+&= \sum_{s'}\mathbb{E}[G_{t+1} \mid S_{t+1}=s']p(s' \mid s)\\
+&= \sum_{s'}v_\pi(s')\sum_a\pi(a \mid s)p(s' \mid s,a).
 \end{aligned}
 $$
 
@@ -1590,18 +1595,18 @@ $$
 
 $$
 v_\pi(s)=
-\sum_a\pi(a|s)
+\sum_a\pi(a \mid s)
 \left[
-\sum_r p(r|s,a)r+\gamma\sum_{s'}p(s'|s,a)v_\pi(s')
+\sum_r p(r \mid s,a)r+\gamma\sum_{s'}p(s' \mid s,a)v_\pi(s')
 \right].
 $$
 
 若定义
 
 $$
-r_\pi(s)=\sum_a\pi(a|s)\sum_r p(r|s,a)r,
+r_\pi(s)=\sum_a\pi(a \mid s)\sum_r p(r \mid s,a)r,
 \quad
-p_\pi(s'|s)=\sum_a\pi(a|s)p(s'|s,a),
+p_\pi(s' \mid s)=\sum_a\pi(a \mid s)p(s' \mid s,a),
 $$
 
 则有矩阵形式：
@@ -1621,21 +1626,20 @@ $$
 Bellman optimality operator 定义为
 
 $$
-(Tv)(s)=\max_a\left[r(s,a)+\gamma\sum_{s'}p(s'|s,a)v(s')\right].
+(Tv)(s)=\max_a\left[r(s,a)+\gamma\sum_{s'}p(s' \mid s,a)v(s')\right].
 $$
 
 对任意两个 value function $u,v$：
 
 $$
 \begin{aligned}
-|(Tu)(s)-(Tv)(s)|
-&\le
+\lvert (Tu)(s)-(Tv)(s) \rvert &\le
 \max_a
-\left|
-\gamma\sum_{s'}p(s'|s,a)(u(s')-v(s'))
-\right|\\
+\left\lvert
+\gamma\sum_{s'}p(s' \mid s,a)(u(s')-v(s'))
+\right\rvert\\
 &\le
-\gamma\max_a\sum_{s'}p(s'|s,a)\|u-v\|_\infty\\
+\gamma\max_a\sum_{s'}p(s' \mid s,a)\|u-v\|_\infty\\
 &=
 \gamma\|u-v\|_\infty.
 \end{aligned}
@@ -1681,43 +1685,43 @@ $$
 $$
 p_\theta(\tau)=\rho_0(s_0)
 \prod_{t=0}^{T-1}
-\pi_\theta(a_t|s_t)p(s_{t+1},r_{t+1}|s_t,a_t).
+\pi_\theta(a_t \mid s_t)p(s_{t+1},r_{t+1} \mid s_t,a_t).
 $$
 
 环境转移和奖励分布不含 $\theta$，所以
 
 $$
-\nabla_\theta\log p_\theta(\tau) =\sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(a_t|s_t).
+\nabla_\theta\log p_\theta(\tau) =\sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(a_t \mid s_t).
 $$
 
 得到 trajectory 形式：
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{\tau} \left[ \sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(a_t|s_t)R(\tau) \right].
+\nabla_\theta J(\theta) = \mathbb{E}_{\tau} \left[ \sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(a_t \mid s_t)R(\tau) \right].
 $$
 
 时刻 $t$ 的动作不影响过去奖励，所以可把整段回报换成 reward-to-go：
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{\tau} \left[ \sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(a_t|s_t)G_t \right], \quad G_t=\sum_{k=t}^{T-1}\gamma^{k-t}R_{k+1}.
+\nabla_\theta J(\theta) = \mathbb{E}_{\tau} \left[ \sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(a_t \mid s_t)G_t \right], \quad G_t=\sum_{k=t}^{T-1}\gamma^{k-t}R_{k+1}.
 $$
 
 再把 reward-to-go 换成条件期望，得到 action-value 形式：
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{s_t,a_t} \left[ \nabla_\theta\log\pi_\theta(a_t|s_t)Q^{\pi}(s_t,a_t) \right].
+\nabla_\theta J(\theta) = \mathbb{E}_{s_t,a_t} \left[ \nabla_\theta\log\pi_\theta(a_t \mid s_t)Q^{\pi}(s_t,a_t) \right].
 $$
 
 baseline 不改变期望。对任意只依赖状态的 $b(s)$：
 
 $$
 \begin{aligned}
-\mathbb{E}_{a\sim\pi_\theta(\cdot|s)}
-\left[\nabla_\theta\log\pi_\theta(a|s)b(s)\right]
+\mathbb{E}_{a\sim\pi_\theta(\cdot \mid s)}
+\left[\nabla_\theta\log\pi_\theta(a \mid s)b(s)\right]
 &=
-b(s)\sum_a\pi_\theta(a|s)\nabla_\theta\log\pi_\theta(a|s)\\
+b(s)\sum_a\pi_\theta(a \mid s)\nabla_\theta\log\pi_\theta(a \mid s)\\
 &=
-b(s)\sum_a\nabla_\theta\pi_\theta(a|s)\\
+b(s)\sum_a\nabla_\theta\pi_\theta(a \mid s)\\
 &=b(s)\nabla_\theta 1=0.
 \end{aligned}
 $$
@@ -1725,19 +1729,19 @@ $$
 因此可把 $Q^{\pi}(s,a)$ 换成 advantage：
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{s_t,a_t} \left[ \nabla_\theta\log\pi_\theta(a_t|s_t)A^{\pi}(s_t,a_t) \right].
+\nabla_\theta J(\theta) = \mathbb{E}_{s_t,a_t} \left[ \nabla_\theta\log\pi_\theta(a_t \mid s_t)A^{\pi}(s_t,a_t) \right].
 $$
 
 无限时域折扣设定常写成 discounted occupancy form：
 
 $$
-\nabla_\theta J(\theta) = \frac{1}{1-\gamma} \mathbb{E}_{s\sim d_\gamma^{\pi},a\sim\pi_\theta(\cdot|s)} \left[ \nabla_\theta\log\pi_\theta(a|s)Q^{\pi}(s,a) \right],
+\nabla_\theta J(\theta) = \frac{1}{1-\gamma} \mathbb{E}_{s\sim d_\gamma^{\pi},a\sim\pi_\theta(\cdot \mid s)} \left[ \nabla_\theta\log\pi_\theta(a \mid s)Q^{\pi}(s,a) \right],
 $$
 
 其中
 
 $$
-d_\gamma^{\pi}(s)=(1-\gamma)\sum_{t=0}^{\infty}\gamma^{t}P(S_t=s|\pi).
+d_\gamma^{\pi}(s)=(1-\gamma)\sum_{t=0}^{\infty}\gamma^{t}P(S_t=s \mid \pi).
 $$
 
 trajectory 形式更适合解释 REINFORCE/PPO 代码；discounted occupancy 形式更适合和 Bellman、actor-critic 的状态分布对齐。不同资料省略 $\frac{1}{1-\gamma}$ 时，通常是把常数吸收到学习率或采用未归一化 occupancy measure。
@@ -1772,7 +1776,7 @@ $$
 g=
 \left.
 \nabla_\theta L_{\theta_{old}}(\theta)
-\right|_{\theta=\theta_{old}}
+\right\rvert_{\theta=\theta_{old}}
 $$
 
 于是局部问题变成：
@@ -1838,19 +1842,17 @@ $$
 - 正向：更在意真实分布 $p$ 中的常见事件，也就是两峰，我们要优先确保它们在分布 $q$ 中不是特别罕见（信息长度不是特别长）。当 $p$ 具有多个峰时， $q$ 选择将这些峰模糊到一起，以便将高概率质量放到所有峰上
 - 反向：更在意真实分布 $p$ 中的罕见事件，也就是谷底，我们要优先确保它们在分布 $q$ 中不是特别常见（信息长度特别长的那些事件）。当 $p$ 具有多个峰并且这些峰间隔很宽时，最小化 KL 散度会选择单个峰，以避免将概率质量放置在 $p$ 的多个峰之间的低概率区域中
 
-- KL divergence estimation
-- 考虑反向 KL 散度：
+**KL divergence estimation.** 考虑反向 KL 散度：
 
 $$
 D_{KL}(q \Vert p) = \sum_x q(x)\log\frac{q(x)}{p(x)} = \mathbb{E}_{x\sim q} \left[ \log\frac{q(x)}{p(x)} \right]
 $$
 
-- 目标：
-  - 最好是无偏的，即估计值的期望与真实值相等。
-  - 方差尽量小。
-- 估计（定义 $\delta(x) = \frac{p(x)}{q(x)}$）：
-  - **$k_1 = -\log \delta(x)$.** 直接按照定义，无偏估计；但一半的估计是负数，而 KL 是非负数，所以方差较大。
-  - **$k_2 = \frac{1}{2}(\log \delta(x))^{2}$.** 可以从 $f$-divergence 的二阶近似理解：
+目标是得到无偏或小偏差、低方差的 KL 估计。定义 $\delta(x) = \frac{p(x)}{q(x)}$。
+
+**$k_1 = -\log \delta(x)$.** 这是直接按照定义得到的无偏估计；但一半的估计是负数，而 KL 是非负数，所以方差较大。
+
+**$k_2 = \frac{1}{2}(\log \delta(x))^{2}$.** 这个估计可以从 $f$-divergence 的二阶近似理解：
 
 $$
 D_f(p,q) = \mathbb{E}_{x\sim q} \left[ f\left(\frac{p(x)}{q(x)}\right) \right]
@@ -1864,8 +1866,7 @@ $$
 
 where $F$ is the Fisher information matrix for $p_\theta$ evaluated at $p_\theta=p_0$.
 
-- KL 散度对应 $f(x) = -\log(x)$， $k_2$ 对应 $f(x) = \frac{1}{2}(\log x)^{2}$
-- 有偏（小偏差）的二阶展开为：
+KL 散度对应 $f(x) = -\log(x)$， $k_2$ 对应 $f(x) = \frac{1}{2}(\log x)^{2}$。有偏（小偏差）的二阶展开为：
 
 $$
 f\left(\frac{q(x)}{p(x)}\right) = f(1+\epsilon) \approx f(1)+f'(1)\epsilon+\frac{1}{2}f''(1)\epsilon^{2}
@@ -1873,7 +1874,7 @@ $$
 
 $k_1,k_2$ 的 $f''(1)=1$。$k_2$ 恒为正，因此方差较低，但它是小偏差估计。
 
-- **$k_3 = \delta(x) - 1 - \log \delta(x) = \delta(x) - 1 + k_1$.** 通过加入期望为 0 的修正项，让估计保持无偏：
+**$k_3 = \delta(x) - 1 - \log \delta(x) = \delta(x) - 1 + k_1$.** 它通过加入期望为 0 的修正项，让估计保持无偏：
 
 $$
 \begin{aligned}
@@ -1900,8 +1901,8 @@ $$
 
 $$
 \begin{aligned}
-p(x|a) &= \sum_b p(x, b|a) \quad \text{law of total (cond) prob}\\
-&= \sum_b p(x|b,a)p(b|a) \quad \text{Def of cond prob}
+p(x \mid a) &= \sum_b p(x, b \mid a) \quad \text{law of total (cond) prob}\\
+&= \sum_b p(x \mid b,a)p(b \mid a) \quad \text{Def of cond prob}
 \end{aligned}
 $$
 
@@ -1909,8 +1910,8 @@ $$
 
 $$
 \begin{aligned}
-\mathbb{E}_a[X|A=a]p(a) &= \sum_a \left[\sum_x p(x|a) x\right] p(a) \quad \text{Def of cond Exp}\\
-&= \sum_x\sum_a p(x|a) p(a) x \\
+\mathbb{E}_a[X \mid A=a]p(a) &= \sum_a \left[\sum_x p(x \mid a) x\right] p(a) \quad \text{Def of cond Exp}\\
+&= \sum_x\sum_a p(x \mid a) p(a) x \\
 &= \sum_x p(x) x \quad \text{law of total prob} \\
 &= E[X]
 \end{aligned}
@@ -1920,9 +1921,9 @@ $$
 
 $$
 \begin{aligned}
-\mathbb{E}[X|A=a] &= \sum_x x p(x|a) \\
-&= \sum_x x\left[\sum_b p(x|b,a)p(b|a)\right] \quad \text{chain rule of cond prob} \\
-&= \sum_b \left[\sum_x xp(x|b,a)\right] p(b|a) \\
-&= \sum_b \mathbb{E}[X|A=a,B=b] p(b|a) \quad \text{Def of cond Exp}
+\mathbb{E}[X \mid A=a] &= \sum_x x p(x \mid a) \\
+&= \sum_x x\left[\sum_b p(x \mid b,a)p(b \mid a)\right] \quad \text{chain rule of cond prob} \\
+&= \sum_b \left[\sum_x xp(x \mid b,a)\right] p(b \mid a) \\
+&= \sum_b \mathbb{E}[X \mid A=a,B=b] p(b \mid a) \quad \text{Def of cond Exp}
 \end{aligned}
 $$

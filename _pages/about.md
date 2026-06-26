@@ -21,7 +21,7 @@ social: true # includes social icons at the bottom of the page
 announcements:
   enabled: true # includes a list of news items
   scrollable: true # adds a vertical scroll bar if there are more than 3 news items
-  limit: 5 # leave blank to include all the news in the `_news` folder
+  limit: 6 # leave blank to include all the news in the `_news` folder
 
 latest_posts:
   enabled: true
@@ -29,11 +29,11 @@ latest_posts:
   limit: 8 # leave blank to include all the blog posts
 ---
 
-I am an advanced algorithm engineer at HONOR, working at the intersection of mathematical modeling, medical AI, wearable health algorithms, and safety-aware decision systems. My background is in scientific computing and uncertainty quantification, and my current work focuses on turning noisy physiological signals into deployable, personalized, and reliable health features.
+I am an advanced algorithm engineer at HONOR, working at the intersection of mathematical modeling, medical AI, wearable health algorithms, and RL-based physiological control prototypes. My background is in scientific computing and uncertainty quantification, and my current work focuses on turning noisy physiological signals into deployable, personalized, and reliable health features.
 
 As the lead developer, I spearheaded the commercialization of two key wearable health features: [sudden cardiac arrest screening based on heart-rate deceleration capacity (DC)]({% link _news/announcement_6.md %}) in the HONOR Watch 5 Ultra, and [24-hour continuous non-invasive blood pressure monitoring]({% link _news/announcement_4.md %}) in the HONOR Watch 5 Pro. These projects combine physiological signal processing, contrastive representation learning, conditional generative personalization, calibration, domain adaptation, and product-level robustness.
 
-My project portfolio is organized around four algorithm pillars: **SafeRunRL**, a simulation-based safe reinforcement learning controller for adaptive treadmill control from wearable signals; **CufflessBP-Gen**, a conditional generative personalization pipeline for 24-hour cuffless blood pressure monitoring; **CardioDC-CL**, an ECG/PPG contrastive learning framework for wearable deceleration-capacity screening; and my Ph.D. research on orthogonal polynomials and uncertainty quantification for biomedical simulation.
+My project portfolio is organized around four algorithm pillars: **SafeRunRL**, a PPO-based research prototype for target-heart-rate treadmill control from wearable PPG/ACC states; **CufflessBP-Gen**, a conditional generative personalization pipeline for 24-hour cuffless blood pressure monitoring; **CardioDC-CL**, an ECG/PPG contrastive learning framework for wearable deceleration-capacity screening; and my Ph.D. research on orthogonal polynomials and uncertainty quantification for biomedical simulation.
 
 Previously, I received my Ph.D. in Mathematics from the University of Utah, advised by Professor [Akil Narayan](https://www.sci.utah.edu/~akil/). My doctoral research centered on orthogonal polynomial recurrence algorithms, polynomial chaos expansion, and noninvasive uncertainty quantification for biomedical simulations. I developed methods for computing [univariate](https://github.com/ZEXINLIU/Uni_ttr_examples) recurrence coefficients and [multivariate](https://github.com/ZEXINLIU/Multi_ttr_examples) recurrence matrices, and contributed to [UncertainSCI](https://github.com/SCIInstitute/UncertainSCI), an open-source Python toolkit for uncertainty quantification in computational biomedicine, in collaboration with Professor [Rob MacLeod's team](https://www.sci.utah.edu/~macleod/).
 

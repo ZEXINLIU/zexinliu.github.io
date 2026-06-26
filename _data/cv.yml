@@ -4,7 +4,7 @@
     - name: Full Name
       value: Zexin Liu
     - name: Positioning
-      value: Medical AI and wearable health algorithm researcher with a strong mathematical background in scientific computing, uncertainty quantification, safe RL, generative personalization, and contrastive physiological modeling.
+      value: Medical AI and wearable health algorithm researcher with a strong mathematical background in scientific computing, uncertainty quantification, physiological signal modeling, generative personalization, contrastive learning, and RL-based control prototypes.
     - name: Email
       value: liu.zexin9518@gmail.com
     - name: Website
@@ -35,13 +35,13 @@
         - Lead developer for 24-hour continuous non-invasive blood pressure monitoring on HONOR Watch 5 Pro
         - Lead developer for sudden cardiac arrest screening based on heart-rate deceleration capacity on HONOR Watch 5 Ultra
         - Physiological signal modeling, multimodal representation learning, calibration, domain adaptation, and product-level health-feature deployment
-        - Applied project tracks in safe reinforcement learning, conditional generative personalization, ECG/PPG contrastive learning, and uncertainty-aware biomedical simulation
+        - Applied project tracks in target-heart-rate reinforcement learning control, conditional generative personalization, ECG/PPG contrastive learning, and uncertainty-aware biomedical simulation
 
 - title: Core Projects
   type: time_table
   contents:
     - title: SafeRunRL
-      description: Simulation-based safe reinforcement learning prototype for adaptive treadmill control from wearable PPG/ACC-derived physiological states, with constrained MDP formulation, personalized cardiovascular simulation, and action shielding.
+      description: PPO-based research prototype for target-heart-rate treadmill control from wearable PPG/ACC-derived states, with a fitted heart-rate response environment, compact MDP design, rollout/GAE training, and speed/incline action policy.
     - title: 24H Cuffless Blood Pressure Monitoring
       description: Wearable PPG blood pressure monitoring project with personalization, calibration, generative modeling, and product-level robustness.
     - title: Deceleration Capacity Screening from Wearable Signals
@@ -70,6 +70,7 @@
       items:
         - Beijing High-Level Overseas Talent Funding Program
         - HONOR Breakthrough Award for work in non-invasive blood pressure prediction
+        - HONOR Competitive Technology Development Team Award as a core contributor and team lead for cardiovascular health algorithms
 
 - title: Research and Engineering Interests
   type: nested_list

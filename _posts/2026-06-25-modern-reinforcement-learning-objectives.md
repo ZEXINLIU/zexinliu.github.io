@@ -6,6 +6,11 @@ description: A structured reinforcement learning tutorial from Bellman targets a
 tags: reinforcement-learning policy-gradient llm-rl ppo rlhf
 categories: technical-notes
 featured: true
+_styles: |
+  .post-content pre code {
+    white-space: pre;
+    word-wrap: normal;
+  }
 ---
 
 本文重点包括：
@@ -711,7 +716,13 @@ $$
 \rho(s)=\sum_{s'\in\mathcal{S}}d_\beta(s')Pr_\pi(s|s')
 $$
 
-$Pr_\pi(s|s')$ 是 discounted total transition probability。
+其中：
+
+$$
+Pr_\pi(s|s')
+$$
+
+是 discounted total transition probability。
 
 带 baseline 的形式是：
 
@@ -724,7 +735,11 @@ $$
 \right]
 $$
 
-实现上，给定 behavior policy $\beta(a|s)$：
+实现上，给定 behavior policy：
+
+$$
+\beta(a|s)
+$$
 
 1. 用 $\beta(a|s_t)$ 采样 $a_t$，观察 $r_{t+1},s_{t+1}$。
 2. 用 $\delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)$ 估计 advantage。
@@ -881,24 +896,31 @@ GAE 本质上是 one-step TD error 和 MC 之间的平滑插值， $\lambda$ 平
 
 for each episode, implement below:
 
-1. collect a rollout $\lbrace s_t, a_t, \pi_\theta(a_t|s_t), s_{t+1}\rbrace$ for a given number of steps, 行为策略 $\pi_\theta$ update after each episode
+1. collect a rollout:
+
+   $$
+   \lbrace s_t, a_t, \pi_\theta(a_t|s_t), s_{t+1}\rbrace
+   $$
+
+   for a given number of steps, 行为策略 $\pi_\theta$ update after each episode
+
 2. compute Generalized Advantage Estimation (GAE) and return
 
-- TD error $\delta_t = r_t + \gamma v(s_{t+1}) - v(s_t)$
-- Advantage $A_t = \sum_{k=0}^{\infty} (\gamma \lambda)^{k} \delta_{t+k}$，等价于递推关系 $A_t = \delta_t + (\gamma \lambda)A_{t+1}$, implemented in reverse order in practice, 需要归一化提高训练稳定性
-- return $q(s_t,a_t) = A(s_t,a_t) + v(s_t)$, target for value
+   - TD error $\delta_t = r_t + \gamma v(s_{t+1}) - v(s_t)$
+   - Advantage $A_t = \sum_{k=0}^{\infty} (\gamma \lambda)^{k} \delta_{t+k}$，等价于递推关系 $A_t = \delta_t + (\gamma \lambda)A_{t+1}$, implemented in reverse order in practice, 需要归一化提高训练稳定性
+   - return $q(s_t,a_t) = A(s_t,a_t) + v(s_t)$, target for value
 
 3. for each ppo epoch (model update after each epoch)
 
-- 用新策略评估旧数据 evaluate rollout by updated model, 得到 $\pi_\theta(a_t|s_t), v_\theta(s_t), H(\theta)$
-- 计算 ppo clip loss
-- $r_t(\theta) = \frac{\pi_{\theta}(a_t|s_t)}{\pi_{old}(a_t|s_t)} = \exp(\log\pi_{\theta}(a_t|s_t) - \log\pi_{old}(a_t|s_t))$
-- policy loss $-\min(r_t(\theta)A_t, clip(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t)$
-- value loss $(v_\theta(s_t) - q(s_t,a_t))^{2}$
-- entropy bonus $H(\pi_\theta) = -\mathbb{E}[\sum_a \pi_\theta(a|s_t)\log\pi_\theta(a|s_t)]$
-- total loss = policy loss + value loss - entropy bonus
-- 总结：同一批经验不要只用一次，可以多学几轮；但是每学一轮都要检查新策略相对旧策略变了多少。如果变化还小，就继续学习；如果某些动作的概率被推得太高或压得太低，就把这部分更新截住
-- 参考：https://zhuanlan.zhihu.com/p/614115887
+   - 用新策略评估旧数据 evaluate rollout by updated model, 得到 $\pi_\theta(a_t|s_t), v_\theta(s_t), H(\theta)$
+   - 计算 ppo clip loss
+   - $r_t(\theta) = \frac{\pi_{\theta}(a_t|s_t)}{\pi_{old}(a_t|s_t)} = \exp(\log\pi_{\theta}(a_t|s_t) - \log\pi_{old}(a_t|s_t))$
+   - policy loss $-\min(r_t(\theta)A_t, clip(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t)$
+   - value loss $(v_\theta(s_t) - q(s_t,a_t))^{2}$
+   - entropy bonus $H(\pi_\theta) = -\mathbb{E}[\sum_a \pi_\theta(a|s_t)\log\pi_\theta(a|s_t)]$
+   - total loss = policy loss + value loss - entropy bonus
+   - 总结：同一批经验不要只用一次，可以多学几轮；但是每学一轮都要检查新策略相对旧策略变了多少。如果变化还小，就继续学习；如果某些动作的概率被推得太高或压得太低，就把这部分更新截住
+   - 参考：https://zhuanlan.zhihu.com/p/614115887
 
 <a id="grpo-from-deepseekmath"></a>
 
@@ -944,9 +966,9 @@ $$
 
 ##### 实现流程
 
-1. 对每个 prompt 在线采样多个回答，得到一组样本 (batch) : $x_j \rightarrow \lbrace y_{j,1}, \dots, y_{j,G}\rbrace$, where $x_j$ is $j$-th prompt, , $G$ is group size, $y_{j,i}$ is $i$-th response under $j$-th prompt，
-2. 计算对应奖励 $r_{j,i} = R(x_j, y_{j,i})$（对于 GSM8K 数据集，每道题都有明确的数值答案，不需要训练任何 RM，直接用规则判断。RLVR 核心思想：可验证奖励）
-3. 计算组内均值、标准差和 response-level advantage：
+- **Step 1: sample grouped responses.** 对每个 prompt 在线采样多个回答，得到一组样本 (batch)：$x_j \rightarrow \lbrace y_{j,1}, \dots, y_{j,G}\rbrace$, where $x_j$ is $j$-th prompt, $G$ is group size, $y_{j,i}$ is $i$-th response under $j$-th prompt。
+- **Step 2: compute rewards.** 计算对应奖励 $r_{j,i} = R(x_j, y_{j,i})$（对于 GSM8K 数据集，每道题都有明确的数值答案，不需要训练任何 RM，直接用规则判断。RLVR 核心思想：可验证奖励）。
+- **Step 3: normalize group-relative advantages.** 计算组内均值、标准差和 response-level advantage：
 
 $$
 \begin{aligned}
@@ -962,13 +984,13 @@ $$
 - 相对比较更稳定：人类偏好本质上也是比较式的（"A 比 B 好"），不是绝对的（"A 得 87 分"）。GRPO 的组内比较和人类的判断方式天然一致。
 - 方差更低：同一组内的回答共享相同的 prompt，唯一的差异是模型生成的随机性。这种"控制变量"式的比较比跨样本的绝对评分更稳定。
 
-4. GRPO training loss:
+- **Step 4: optimize the GRPO training loss.**
 
 $$
 \mathcal{L} = -J_{\text{GRPO}}^{\text{clip}}(\theta) +\beta_{KL}\hat D_{KL}
 $$
 
-1. policy loss:
+- Policy loss:
 
 $$
 J_{\text{GRPO}}^{\text{clip}}(\theta) = \mathbb{E}_{j,i} \left[ \min\left( \rho_{j,i}(\theta)\hat A_{j,i}, \mathrm{clip}(\rho_{j,i}(\theta),1-\epsilon,1+\epsilon)\hat A_{j,i} \right) \right]
@@ -981,8 +1003,7 @@ $$
 $$
 
 - PPO 的裁剪机制 advantages $\hat{A}_{j,i}$ 来自组内比较，替代 Critic (PPO)
-
-2. GRPO uses the k3 estimator for KL divergence:
+- GRPO uses the k3 estimator for KL divergence:
 
 $$
 \hat D_{KL} = \exp(\Delta)-\Delta-1, \quad \Delta=\log\pi_{ref}(y|x)-\log\pi_\theta(y|x).
@@ -1824,21 +1845,12 @@ $$
 D_{KL}(q \Vert p) = \sum_x q(x)\log\frac{q(x)}{p(x)} = \mathbb{E}_{x\sim q} \left[ \log\frac{q(x)}{p(x)} \right]
 $$
 
-- 目标
-
-1. 最好是无偏的，即估计值的期望与真实值相等
-2. 方差尽量小
-
-- 估计（定义 $\delta(x) = \frac{p(x)}{q(x)}$）
-
-1. $k_1 = -\log \delta(x)$
-
-- 直接按照定义，无偏估计
-- 一半的估计是负数，但 KL 是非负数，导致方差较大
-
-2. $k_2 = \frac{1}{2}(\log \delta(x))^{2}$
-
-- 考虑 $f$-divergence：
+- 目标：
+  - 最好是无偏的，即估计值的期望与真实值相等。
+  - 方差尽量小。
+- 估计（定义 $\delta(x) = \frac{p(x)}{q(x)}$）：
+  - **$k_1 = -\log \delta(x)$.** 直接按照定义，无偏估计；但一半的估计是负数，而 KL 是非负数，所以方差较大。
+  - **$k_2 = \frac{1}{2}(\log \delta(x))^{2}$.** 可以从 $f$-divergence 的二阶近似理解：
 
 $$
 D_f(p,q) = \mathbb{E}_{x\sim q} \left[ f\left(\frac{p(x)}{q(x)}\right) \right]
@@ -1859,13 +1871,9 @@ $$
 f\left(\frac{q(x)}{p(x)}\right) = f(1+\epsilon) \approx f(1)+f'(1)\epsilon+\frac{1}{2}f''(1)\epsilon^{2}
 $$
 
-$k_1,k_2$ 的 $f''(1)=1$。
+$k_1,k_2$ 的 $f''(1)=1$。$k_2$ 恒为正，因此方差较低，但它是小偏差估计。
 
-- 低方差（ $k_2$ 恒为正）
-
-3. $k_3 = \delta(x) - 1 - \log \delta(x) = \delta(x) - 1 + k_1$
-
-- 无偏：找到一个项，期望为 0 的，保证 $k_3$ 无偏
+- **$k_3 = \delta(x) - 1 - \log \delta(x) = \delta(x) - 1 + k_1$.** 通过加入期望为 0 的修正项，让估计保持无偏：
 
 $$
 \begin{aligned}
@@ -1876,9 +1884,7 @@ $$
 \end{aligned}
 $$
 
-所以对任意的 $\lambda$， $k_1 + \lambda (\delta(x) - 1)$ 都是无偏估计，选择一个 $\lambda$ 使得方差最小（最简单 $\lambda = 1$）
-
-- 低方差：找到一个项，与 $k_1$ 负相关，拉低方差
+所以对任意的 $\lambda$， $k_1 + \lambda (\delta(x) - 1)$ 都是无偏估计，选择一个 $\lambda$ 使得方差最小（最简单 $\lambda = 1$）。直觉上，$\delta(x)-1$ 与 $k_1$ 负相关，可以拉低方差：
 
 $$
 \delta(x) - 1 \propto \log\delta(x) = -k_1

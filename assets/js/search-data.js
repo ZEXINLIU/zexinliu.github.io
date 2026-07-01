@@ -73,11 +73,11 @@ ninja.data = [{
             window.location.href = "/blog/2026/nano-vllm-pipeline-tutorial/";
           
         },
-      },{id: "post-distributed-training-for-large-models-collectives-zero-fsdp-tensor-parallelism-and-pipeline-parallelism",
+      },{id: "post-distributed-training-for-large-models-collectives-zero-fsdp-tensor-pipeline-and-expert-parallelism",
         
-          title: "Distributed Training for Large Models: Collectives, ZeRO/FSDP, Tensor Parallelism, and Pipeline Parallelism",
+          title: "Distributed Training for Large Models: Collectives, ZeRO/FSDP, Tensor, Pipeline, and Expert Parallelism",
         
-        description: "从 collective 通信、DDP/FSDP/ZeRO 到 TP/PP/SP/EP 的大模型训练并行笔记。",
+        description: "从 parameter、activation、gradient、optimizer state 的生命周期出发，梳理 All-Reduce/All-Gather/Reduce-Scatter/All-to-All、DDP、ZeRO/FSDP、TP/PP/SP/CP/EP 及显存-通信权衡。",
         section: "Posts",
         handler: () => {
           
@@ -95,11 +95,11 @@ ninja.data = [{
             window.location.href = "/blog/2026/attention-tutorial/";
           
         },
-      },{id: "post-flow-based-generative-models-normalizing-flow-flow-matching-rectified-flow-and-meanflow",
+      },{id: "post-flow-based-generative-models-from-normalizing-flows-to-flow-matching-reflow-and-meanflow",
         
-          title: "Flow-Based Generative Models: Normalizing Flow, Flow Matching, Rectified Flow, and MeanFlow",
+          title: "Flow-Based Generative Models: From Normalizing Flows to Flow Matching, Reflow, and MeanFlow",
         
-        description: "从 Normalizing Flow、Flow Matching 到 Rectified Flow、MeanFlow 的生成模型主线。",
+        description: "沿着 exact likelihood、probability path、velocity regression 和 average velocity 这条主线，梳理 NF/CNF、FM/CFM、Gaussian/OT/CondOT path、Stochastic Interpolants、Rectified Flow/Reflow、MeanFlow 与 CFG。",
         section: "Posts",
         handler: () => {
           
@@ -128,11 +128,11 @@ ninja.data = [{
             window.location.href = "/blog/2025/orthogonal-poly/";
           
         },
-      },{id: "post-contrastive-learning-from-sampling-strategies-to-multimodal-representation-learning",
+      },{id: "post-contrastive-learning-objectives-dictionaries-momentum-encoders-and-multimodal-alignment",
         
-          title: "Contrastive Learning: From Sampling Strategies to Multimodal Representation Learning",
+          title: "Contrastive Learning: Objectives, Dictionaries, Momentum Encoders, and Multimodal Alignment",
         
-        description: "从 Triplet、InfoNCE、NT-Xent 到 MoCo、SimCLR、DINO、CLIP 的统一视角。",
+        description: "从 anchor/positive/negative、dictionary 与 temperature 出发，梳理 Triplet、NCE/InfoNCE、NT-Xent、MoCo/SimCLR、BYOL/SimSiam/DINO、CLIP 以及 ArcFace/CosFace 的候选集合与表征几何。",
         section: "Posts",
         handler: () => {
           

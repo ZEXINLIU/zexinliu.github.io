@@ -5,6 +5,14 @@ date: 2026-03-16 00:00:00
 description: 从 parameter、activation、gradient、optimizer state 的生命周期出发，梳理 All-Reduce/All-Gather/Reduce-Scatter/All-to-All、DDP、ZeRO/FSDP、TP/PP/SP/CP/EP 及显存-通信权衡。
 tags: distributed-training large-language-models ai-infra deep-learning-systems
 categories: ai-infra
+_styles: |
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+  }
 ---
 
 ## 开篇总结

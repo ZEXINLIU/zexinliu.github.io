@@ -6,6 +6,14 @@ description: A research-level map of orthogonal polynomial recurrence algorithms
 tags: mathematics scientific-computing orthogonal-polynomials uncertainty-quantification polynomial-chaos
 categories: research-notes
 featured: true
+_styles: |
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+  }
 ---
 
 本文梳理的是我博士期间围绕正交多项式、递推系数、不确定性量化和生物医学仿真的研究主线。旧版本文章主要是面向非专业读者的正交多项式科普；这里保留“为什么正交多项式重要”的入口，但把重点推进到更核心的问题：如何针对非经典测度稳定构造正交基，并把它们用于 polynomial chaos expansion (PCE) 和真实医学/工程仿真的 uncertainty quantification (UQ)。

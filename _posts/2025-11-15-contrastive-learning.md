@@ -6,6 +6,14 @@ description: 从 anchor/positive/negative、dictionary 与 temperature 出发，
 tags: contrastive-learning representation-learning multimodal-learning machine-learning
 categories: ai-notes
 featured: true
+_styles: |
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+  }
 ---
 
 对比学习可以按一条因果链理解：任务语义决定 view 与 positive 的构造；positive、negative 或 target 的来源决定候选集合；候选集合的规模、新鲜度和采样成本决定 memory bank、queue、large batch 或 prototype；loss 将这些设计转成梯度；encoder 更新、teacher、stop-gradient 和 centering 等机制决定训练信号是否稳定。

@@ -5,6 +5,14 @@ date: 2025-12-08 00:00:00
 description: 从 score matching、DDPM 到 SDE/ODE 采样的扩散模型笔记。
 tags: diffusion score-matching generative-models stochastic-processes
 categories: ai-notes
+_styles: |
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+  }
 ---
 
 本文包含的重点内容如下：

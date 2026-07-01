@@ -5,6 +5,14 @@ date: 2026-01-18 00:00:00
 description: 沿着 exact likelihood、probability path、velocity regression 和 average velocity 这条主线，梳理 NF/CNF、FM/CFM、Gaussian/OT/CondOT path、Stochastic Interpolants、Rectified Flow/Reflow、MeanFlow 与 CFG。
 tags: flow-matching normalizing-flows generative-models diffusion
 categories: ai-notes
+_styles: |
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+  }
 ---
 
 本文的重点如下：

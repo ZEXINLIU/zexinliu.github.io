@@ -5,6 +5,14 @@ date: 2026-04-20 00:00:00
 description: 沿请求生命周期拆解 scheduler、paged KV cache、prefill/decode、prefix cache 和采样。
 tags: vllm inference large-language-models ai-infra
 categories: ai-infra
+_styles: |
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+  }
 ---
 
 <a id="top"></a>

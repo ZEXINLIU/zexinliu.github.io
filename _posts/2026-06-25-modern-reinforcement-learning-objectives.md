@@ -7,12 +7,12 @@ tags: reinforcement-learning policy-gradient llm-rl ppo rlhf
 categories: technical-notes
 featured: true
 _styles: |
-  .post-content pre,
-  .post-content figure.highlight pre,
-  .post-content figure.highlight pre code,
-  .post-content pre code {
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
     white-space: pre;
     word-wrap: normal;
+    overflow-wrap: normal;
   }
 ---
 

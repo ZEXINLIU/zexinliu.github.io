@@ -5,6 +5,14 @@ date: 2026-02-22 00:00:00
 description: 从 MHA/MQA/GQA、RoPE、MLA 到 FlashAttention、MoE 的注意力机制笔记。
 tags: attention transformer large-language-models inference
 categories: ai-infra
+_styles: |
+  #markdown-content pre code,
+  #markdown-content figure.highlight pre code,
+  #markdown-content div.highlighter-rouge pre code {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+  }
 ---
 
 ## 开篇总结

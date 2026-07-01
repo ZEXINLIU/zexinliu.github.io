@@ -1,25 +1,25 @@
 ---
 layout: post
-title: "Flow-Based Generative Models: Normalizing Flow, Flow Matching, Rectified Flow, and MeanFlow"
+title: "Flow-Based Generative Models: From Normalizing Flows to Flow Matching, Reflow, and MeanFlow"
 date: 2026-01-18 00:00:00
-description: 从 Normalizing Flow、Flow Matching 到 Rectified Flow、MeanFlow 的生成模型主线。
+description: 沿着 exact likelihood、probability path、velocity regression 和 average velocity 这条主线，梳理 NF/CNF、FM/CFM、Gaussian/OT/CondOT path、Stochastic Interpolants、Rectified Flow/Reflow、MeanFlow 与 CFG。
 tags: flow-matching normalizing-flows generative-models diffusion
 categories: ai-notes
 ---
 
 本文的重点如下：
 
-- **Normalizing Flow / CNF 的难点是“密度怎么算”。** 标准 NF 要把网络限制成可逆且 log-det 可算的结构；CNF 放开网络结构后，又把代价转移到 ODE 积分和散度估计上。
-- **Flow Matching 的难点是“边缘速度场不可见”。** 训练代码只回归 `u_t(x|z)`，但真正生成数据的是边缘速度场 `u_t(x)`；连续性方程、边缘化定理和 CFM/FM 等价性就是为了证明这件事。
-- **Gaussian path、OT path、CondOT path 的难点是“路径设计决定 target 和采样难度”。** Gaussian path 解释 diffusion/noise schedule；OT displacement interpolation 解释最短动能路径；CondOT 把每个样本条件路径做成直线，但它不是说独立配对样本已经构成全局最优传输。
-- **Stochastic Interpolants 的难点是“路径”和“采样过程”被拆开了。** 同一条插值密度 `rho_t` 可以由 probability flow ODE 生成，也可以由带可调噪声的 SDE 生成；为此不仅要学速度 `b_t`，还要在随机采样时学 score `s_t`。
-- **Rectified Flow 的难点不是一句“走直线”能讲清。** 训练目标确实来自直线插值速度 `X_1-X_0`，但模型学到的是条件期望速度场；1-Rectified、2-Rectified/reflow 的核心是改造 coupling，让 ODE 轨迹更少交叉、更接近低步数可解，而不是记住每个配对点的一条直线。
-- **MeanFlow 的难点是“预测对象换了”。** 它不再让模型输出瞬时速度，而是学习区间平均速度；JVP 训练目标和 stop-gradient 是理解一步生成的关键。
-- **条件生成的难点是“条件如何进入同一个速度场”。** 类别、文本或图像条件本质上把 `v_theta(x,t)` 改成 `v_theta(x,t,c)`；classifier-free guidance 则在采样时组合有条件/无条件速度，改变贴合条件与多样性的权衡。
+- **训练对象沿着“似然 -> 速度 -> 平均速度”演进。** NF/CNF 直接优化 exact likelihood；Flow Matching 把 CNF 的反向 ODE 和散度积分换成预设路径上的速度回归；MeanFlow 又把瞬时速度换成区间平均速度，直接对齐少步/一步生成。
+- **密度、路径、coupling 是三件不同的事。** CNF 关心当前模型诱导的密度如何变；FM 关心先选哪条概率路径再回归速度；Rectified Flow 关心源样本和目标样本如何配成 pair，以及 reflow 如何用 teacher ODE 重新分配终点。
+- **同一段代码可能属于不同理论叙事。** 独立 product coupling + 线性路径下，CondOT CFM 和 1-Rectified Flow 的 loss 可以完全相同；它们都学边缘化后的单值速度场，区别在于 CondOT 解释条件路径，Rectified Flow 把它作为 reflow 改 coupling 的第一轮。
+- **“直线”在 Rectified Flow 里首先是训练信号。** `X_1-X_0` 是 sample-level target；模型学到的是 `E[X_1-X_0 | X_t=x]`。第一轮 ODE 会为每个 `X_0` 产生确定终点 `Z_1`，reflow 只保留 teacher 的端点 pair `(X_0,Z_1)`，再训练更直接的 student。
+- **路径设计和推理成本通过 NFE 连在一起。** Gaussian path 对齐 diffusion schedule，OT/CondOT 让 target 更直、更利于少步采样；Euler、Heun、midpoint 的差别要按 NFE 计算，而不是只看步数。
+- **条件生成改的是速度场接口，不改插值几何。** 类别、文本、图像条件进入 `v_theta(x,t,c)`；AdaLN/FiLM 调制全局条件，cross-attention 处理 token 级条件，CFG 在采样时组合有条件与无条件速度，换取质量/多样性权衡。
 
 ## 目录
 
 - [统一视角](#统一视角)
+- [主线技术速览](#主线技术速览)
 - [Normalizing Flow 与 Continuous Normalizing Flow](#normalizing-flow-与-continuous-normalizing-flow)
 - [连续性方程和两个核心定理](#连续性方程和两个核心定理)
 - [Flow Matching](#flow-matching)
@@ -37,68 +37,297 @@ categories: ai-notes
 
 生成模型要做的事可以写成同一句话：从容易采样的源分布 `p_0` 出发，构造一个变换或过程，把样本送到数据分布 `p_1`。不同方法的分歧在于三件事：
 
-| 方法                    | 学什么                                         | 训练时是否解 ODE | 推理时怎么采样               | 主要代价                                    |
-| ----------------------- | ---------------------------------------------- | ---------------- | ---------------------------- | ------------------------------------------- |
-| Normalizing Flow        | 显式可逆映射 `f_theta`                         | 否               | `z -> f_theta(z)` 一次前向   | 网络结构必须可逆，Jacobian 要可算           |
-| CNF                     | 连续速度场 `v_theta(x,t)` 和密度变化           | 通常要解 ODE     | 从噪声积分 ODE 到数据        | 训练和似然评估要数值积分、算散度            |
-| Flow Matching           | 生成指定概率路径的速度场                       | 否               | 从噪声积分 ODE 到数据        | 训练轻，推理仍有 NFE 成本                   |
-| Stochastic Interpolants | 插值密度的速度 `b_t`，随机采样还需 score `s_t` | 否               | 同一 `rho_t` 可用 ODE 或 SDE | 框架统一但对象更多，score/denoiser 也要对齐 |
-| Rectified Flow          | 尽量沿直线搬运耦合样本的速度场                 | 否               | ODE，可用很粗步长            | 需要 reflow 才能持续拉直                    |
-| MeanFlow                | 区间平均速度 `u(z_t,r,t)`                      | 否，但训练要 JVP | `z_0 = z_1 - u(z_1,0,1)`     | 训练目标更复杂，依赖正确 JVP                |
+| 方法                    | 学什么                                         | 训练时是否解 ODE     | 推理时怎么采样                      | 主要代价                                       |
+| ----------------------- | ---------------------------------------------- | -------------------- | ----------------------------------- | ---------------------------------------------- |
+| Normalizing Flow        | 显式可逆复合映射 `f_K \circ \cdots \circ f_1`  | 否                   | `z_0 -> z_1 -> ... -> z_K` 逐层前向 | 每层必须可逆，逐层 Jacobian determinant 要可算 |
+| CNF                     | 当前模型诱导的连续流和密度变化                 | 通常要解 ODE         | 从噪声积分 ODE 到数据               | 训练和似然评估要数值积分、算散度               |
+| Flow Matching           | 生成预设概率路径的速度场                       | 否，直接采样预设路径 | 从噪声积分 ODE 到数据               | 训练轻，推理仍有 NFE 成本                      |
+| Stochastic Interpolants | 插值密度的速度 `b_t`，随机采样还需 score `s_t` | 否                   | 同一 `rho_t` 可用 ODE 或 SDE        | 框架统一但对象更多，score/denoiser 也要对齐    |
+| Rectified Flow          | 尽量沿直线搬运耦合样本的速度场                 | 否                   | ODE，可用很粗步长                   | 需要 reflow 才能持续拉直                       |
+| MeanFlow                | 区间平均速度 `u(z_t,r,t)`                      | 否，但训练要 JVP     | `z_0 = z_1 - u(z_1,0,1)`            | 训练目标更复杂，依赖正确 JVP                   |
 
 这里统一采用 Flow Matching 常见的 **噪声到数据** 方向：
 
 $$
-X_0 \sim p_0,\quad X_1 \sim p_\mathrm{data}.
+X_0 \sim p_0,\quad X_1 \sim p_1=p_\mathrm{data}.
 $$
 
+符号约定如下：
+
+- `X_t` 表示随机变量，`x_t` 表示一次采样得到的具体取值。
+- `p_0` 是源分布，通常是标准高斯；`p_1` 或 `p_\mathrm{data}` 是数据分布。
+- `v_\theta(x,t)` 表示模型学习的速度场；`u_t(x)` 或 `u_t(x|x_1)` 表示由目标概率路径推导出的真实/条件速度场。
+- 标准 NF 的离散层状态仍记作 `z_0,...,z_K`，只用于区分逐层可逆变换，不和 FM 的 `X_0,X_1` 混用。
+
 MeanFlow 原论文采用 **数据到噪声** 记号，后文会单独标注；只要把时间反过来，两种写法表达的是同一条插值路径。
+
+## 主线技术速览
+
+先用一张表把主线压缩成“旧问题 -> 新方法 -> 新代价”的链条。读到某一行仍有疑问，再跳到后面的详细推导。
+
+| 技术                        | 提出动机                                                  | 实现关键                                                                              | 容易误区                                     | 优势                                               | 代价与下一步                                                        |
+| --------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
+| Standard NF                 | 想直接最大化数据似然，同时保留可采样生成器                | 设计 `K` 个可逆层，反向算 `z_0`，逐层累加 log-det                                     | 把 `f_theta` 误读成任意单步网络              | exact likelihood，采样只需逐层前向                 | 可逆结构和 Jacobian determinant 限制网络；引出 CNF                  |
+| CNF                         | 放松离散可逆层的结构限制                                  | 用 ODE flow `dX_t/dt=v_theta(X_t,t)` 和散度积分计算 log-density                       | 以为只写 ODE 就不需要 density simulation     | 连续流表达更灵活，仍可 exact likelihood            | 训练/似然评估要反向 ODE 和散度；引出 FM 的 simulation-free training |
+| Flow Matching / CFM         | 保留 ODE 生成形式，但训练时避开 CNF likelihood simulation | 预设可采样路径 `p_t`，回归条件速度；最优解是边缘速度场                                | 以为模型学的是每个 pair 的私有速度           | 训练简单并行，不算散度                             | 采样仍要多步 ODE；路径设计影响 NFE                                  |
+| Gaussian / OT / CondOT path | 让速度 target 和采样难度由路径设计控制                    | Gaussian path 对齐 diffusion schedule；OT path 追求低动能；CondOT 给出直线条件 target | 把 CondOT 的独立配对当成全局 OT map          | CondOT target 简洁，OT/直线路径利于少步采样        | 独立 coupling 仍可能导致轨迹交叉；引出 Rectified Flow/reflow        |
+| Stochastic Interpolants     | 统一 FM 的 ODE 视角和 diffusion 的 score/SDE 视角         | 插值 `I_t=alpha_tX_0+beta_tX_1+gamma_tZ`，可同时学速度和 score                        | 以为 score 是 FM 必需对象                    | 同一密度路径可用 ODE 或 SDE 采样                   | 对象更多，端点和 score 数值稳定性更复杂                             |
+| Rectified Flow              | 改善独立 coupling 下的交叉和少步采样困难                  | 给定 coupling 做直线速度回归；reflow 用 teacher ODE 终点重构 pair                     | 以为第一轮模型记住 pairwise 直线或保证轨迹直 | 可逐轮让 pair 更符合 deterministic flow 的搬运关系 | 需要额外 teacher ODE 生成 pair；引出一步/少步生成需求               |
+| MeanFlow                    | 绕开多步瞬时速度积分，直接学习区间积分结果                | 学区间平均速度，JVP 构造训练 target，target 侧 stop-gradient                          | 以为它只是 FM 的一步 Euler                   | 可一调用生成，目标直接对齐少步推理                 | 训练目标更复杂，依赖 JVP 和稳定实现                                 |
+| 条件生成 / CFG              | 让同一套速度场按类别、文本或图像上下文生成                | 把条件注入 `v_theta(x,t,c)`；CFG 采样时组合条件/无条件速度                            | 以为条件改变 `X_t` 插值几何                  | 条件控制灵活，CFG 简单有效                         | guidance scale 牺牲多样性，条件接口影响模型容量                     |
 
 ## Normalizing Flow 与 Continuous Normalizing Flow
 
 ### 标准 Normalizing Flow
 
-设 `z ~ p_Z` 是容易采样和计算密度的基分布，`x = f_theta(z)` 是可逆变换。换元公式给出：
+标准 Normalizing Flow 不是学一个任意的“一步生成网络”。论文和代码里常把整条变换简写成 `x=f_theta(z)`，但这里的 `f_theta` 通常表示 `K` 个可逆层的复合：
+
+$$
+z_0 \sim p_0,\quad
+z_k=f_k(z_{k-1};\theta_k),\quad
+x=z_K,\quad
+f_\theta=f_K\circ f_{K-1}\circ\cdots\circ f_1.
+$$
+
+换元公式来自概率质量守恒。先看单个可逆、可微变换 `x=f(z)`。`z` 附近一个很小的体积元 `dz` 被映射到 `x` 附近的体积元 `dx`，局部体积放缩由 Jacobian determinant 控制：
+
+$$
+dx
+=
+\left|
+\det \frac{\partial f(z)}{\partial z}
+\right| dz.
+$$
+
+同一小块概率质量在变换前后不变：
+
+$$
+p_X(x)\,dx=p_Z(z)\,dz,\quad x=f(z).
+$$
+
+把体积变化代入，就得到单层换元公式：
+
+$$
+p_X(x)
+=
+p_Z(z)
+\left|
+\det \frac{\partial f(z)}{\partial z}
+\right|^{-1},
+\quad z=f^{-1}(x).
+$$
+
+等价地，也可以直接用逆映射写：
+
+$$
+p_X(x)
+=
+p_Z(f^{-1}(x))
+\left|
+\det \frac{\partial f^{-1}(x)}{\partial x}
+\right|.
+$$
+
+因为逆函数的 Jacobian 满足：
+
+$$
+\frac{\partial f^{-1}(x)}{\partial x}
+=
+\left(
+\frac{\partial f(z)}{\partial z}
+\right)^{-1},
+\quad z=f^{-1}(x),
+$$
+
+所以 log-density 形式是：
 
 $$
 \log p_X(x)
-= \log p_Z(z) - \log \left|\det \frac{\partial f_\theta(z)}{\partial z}\right|,
-\quad z=f_\theta^{-1}(x).
+=
+\log p_Z(z)
+-
+\log\left|
+\det \frac{\partial f(z)}{\partial z}
+\right|,
+\quad z=f^{-1}(x).
 $$
 
-这也是标准 Normalizing Flow 的核心约束：`f_theta` 不只要表达力强，还必须可逆，并且 Jacobian determinant 不能太贵。RealNVP、Glow 这类模型的工程设计，大量精力都花在 coupling layer、可逆卷积、逐层 log-det 累加上。
-
-训练最大化数据似然：
+多层 Normalizing Flow 只是把这个公式递归应用到每一层。第 `k` 层有：
 
 $$
-\max_\theta\ \mathbb{E}_{x\sim p_\mathrm{data}}
+\log p_k(z_k)
+=
+\log p_{k-1}(z_{k-1})
+-
+\log\left|
+\det \frac{\partial f_k(z_{k-1})}{\partial z_{k-1}}
+\right|.
+$$
+
+从 `k=1` 累加到 `K`，得到：
+
+$$
+\log p_X(x)
+=
+\log p_0(z_0)
+-
+\sum_{k=1}^K
+\log\left|
+\det \frac{\partial f_k(z_{k-1})}{\partial z_{k-1}}
+\right|.
+$$
+
+这就是“Jacobian 行列式逆的离散连乘”的 log 版本：乘法变加法，逆变成负号。标准 NF 的核心约束也在这里：每个 `f_k` 不只要表达力强，还必须可逆，并且这一层的 Jacobian determinant 不能太贵。RealNVP、Glow 这类模型的工程设计，大量精力都花在 coupling layer、可逆卷积、逐层 log-det 累加上。
+
+训练时给定真实数据 `x`，密度评估走反向链路：
+
+$$
+z_K=x,\quad
+z_{k-1}=f_k^{-1}(z_k),\quad
+k=K,K-1,\ldots,1.
+$$
+
+得到 `z_0` 后计算基分布密度，并把每一层的 log-det 修正加起来：
+
+$$
+\log p_\theta(x)
+=
+\log p_0(z_0)
++
+\sum_{k=1}^{K}
+\log\left|
+\det \frac{\partial f_k^{-1}(z_k)}{\partial z_k}
+\right|.
+$$
+
+它与前面的前向 log-det 写法完全等价。训练目标是最大化数据似然，或者最小化 negative log-likelihood：
+
+$$
+\mathcal L_\mathrm{NLL}(\theta)
+=
+\mathbb E_{x\sim p_\mathrm{data}}
 \left[
-\log p_Z(f_\theta^{-1}(x))
-+ \log \left|\det \frac{\partial f_\theta^{-1}(x)}{\partial x}\right|
+-\log p_0(z_0)
++
+\sum_{k=1}^{K}
+\log\left|
+\det \frac{\partial f_k(z_{k-1})}{\partial z_{k-1}}
+\right|
 \right].
 $$
 
-采样则很直接：
+代码化时，log-prob 和 sample 的方向正好相反：
 
 ```python
-def sample_normalizing_flow(base_dist, flow, batch_size):
-    # z 是标准正态等简单分布的样本；flow.forward 是显式可逆映射的正向方向。
-    z = base_dist.sample((batch_size,))
-    x = flow.forward(z)
-    return x
+def normalizing_flow_log_prob(data_x, base_dist, layers):
+    # data_x 是 z_K，也就是数据空间里的点。
+    # 为了算 exact likelihood，需要反向穿过每个可逆层，找到对应的 base 点 z_0。
+    z = data_x
+    inverse_log_det_sum = torch.zeros(data_x.shape[0], device=data_x.device)
+
+    for layer in reversed(layers):
+        # layer.inverse 实现 z_k -> z_{k-1}。
+        # inverse_log_det 是 log |det d f_k^{-1}(z_k) / d z_k|，
+        # 它正是换元公式里要加到 log p_0(z_0) 上的体积修正项。
+        z, inverse_log_det = layer.inverse(z)
+        inverse_log_det_sum = inverse_log_det_sum + inverse_log_det
+
+    # 假设 base_dist.log_prob 已经对非 batch 维度求和，得到每个样本的 log p_0(z_0)。
+    base_log_prob = base_dist.log_prob(z)
+    return base_log_prob + inverse_log_det_sum
 ```
 
-标准 NF 的优势是精确密度和快速采样，短板是可逆结构限制了网络设计自由度。
+采样时从 `z_0 ~ p_0` 出发，按层前向生成 `z_1,...,z_K`：
+
+```python
+def sample_normalizing_flow(base_dist, layers, batch_size):
+    # z 初始是 z_0，来自标准正态等容易采样的基分布。
+    z = base_dist.sample((batch_size,))
+
+    for layer in layers:
+        # 采样只需要 z_{k-1} -> z_k 的前向变换。
+        # 如果只生成样本，forward_log_det 可以不保存；
+        # 如果同时评估生成点密度，它仍然对应逐层体积放缩。
+        z, _forward_log_det = layer.forward(z)
+
+    # 循环结束后 z 就是 z_K，也就是数据空间样本 x。
+    return z
+```
+
+因此，“一步”只应理解为“不需要像 CNF/FM 那样数值积分 ODE”，不是说模型只有一个可逆层。标准 NF 的采样通常是一次穿过 `K` 个可逆层；训练的 likelihood 评估则是反向穿过 `K` 个可逆层并逐层累加 log-det。
 
 ### Continuous Normalizing Flow
 
-CNF 把离散可逆层的复合写成连续时间 ODE：
+CNF 把离散可逆层的复合写成连续时间 ODE。离散残差层可以写成：
+
+$$
+x_{k+1}=x_k+h\,u_\theta(x_k,t_k).
+$$
+
+当步长 `h -> 0`、层数趋向连续极限时，就得到：
 
 $$
 \frac{dX_t}{dt}=v_\theta(X_t,t),\quad X_0\sim p_0.
 $$
 
-只要速度场满足足够的正则条件，ODE 解映射 `psi_t` 是可逆流。密度变化由 instantaneous change of variables 给出：
+它的解流记为：
+
+$$
+X_t=\phi_t(X_0).
+$$
+
+积分形式是：
+
+$$
+X_t
+=X_0+\int_0^t v_\theta(X_s,s)\,ds
+=X_0+\int_0^t v_\theta(\phi_s(X_0),s)\,ds.
+$$
+
+这行只描述“样本点怎么动”，还不是训练目标。它的作用是定义轨迹：如果知道 `X_0`，就能沿速度场走到 `X_t`；如果训练时给定数据点 `X_1=x_1`，就要沿同一个 ODE 反向找到 `X_0`。后面的密度积分必须沿这条轨迹计算，所以样本 ODE 不是 loss 里的装饰项，而是让 likelihood 公式可计算的路径来源。
+
+密度怎么变，要由连续性方程给出。若 `p_t` 是 ODE 流在时刻 `t` 推出的密度，则概率质量守恒写成：
+
+$$
+\partial_t p_t(x)+\nabla\cdot\left(p_t(x)v_\theta(x,t)\right)=0.
+$$
+
+展开散度项：
+
+$$
+\partial_t p_t(x)
++v_\theta(x,t)\cdot\nabla p_t(x)
++p_t(x)\operatorname{div}v_\theta(x,t)
+=0.
+$$
+
+现在把这个 PDE 限制到刚才的样本轨迹 `X_t` 上。因为轨迹满足：
+
+$$
+\frac{dX_t}{dt}=v_\theta(X_t,t),
+$$
+
+链式法则给出：
+
+$$
+\frac{d}{dt}p_t(X_t)
+=
+\partial_t p_t(X_t)
++\nabla p_t(X_t)\cdot\frac{dX_t}{dt}
+=
+\partial_t p_t(X_t)
++v_\theta(X_t,t)\cdot\nabla p_t(X_t).
+$$
+
+把连续性方程代入：
+
+$$
+\frac{d}{dt}p_t(X_t)
+=
+-p_t(X_t)\operatorname{div}v_\theta(X_t,t).
+$$
+
+两边除以 `p_t(X_t)`，得到 instantaneous change of variables：
 
 $$
 \frac{d}{dt}\log p_t(X_t)
@@ -114,31 +343,231 @@ $$
 - \int_0^1 \operatorname{div} v_\theta(X_t,t)\,dt.
 $$
 
-代码化时，CNF 往往把状态扩展成 `(x_t, logp_t)` 一起积分：
+这就是连续版换元公式。前面的积分形式负责产生 `X_t` 这条 characteristic curve；连续性方程负责说明密度沿这条曲线如何变化。离散 NF 用每层 Jacobian determinant 修正密度；CNF 用同一条 ODE 轨迹上的散度积分修正密度。
+
+### CNF 训练时 simulation 在哪里
+
+CNF 训练目标和标准 NF 一样，仍然是最大化真实数据点的 exact log-likelihood：
+
+$$
+\max_\theta\ \mathbb{E}_{x_1\sim p_\mathrm{data}}
+\left[
+\log p_\theta(x_1)
+\right].
+$$
+
+问题是，训练时给定的是数据点 `x_1`，而 likelihood 公式需要两个东西：
+
+$$
+\log p_\theta(x_1)
+=
+\log p_0(x_0)
+-
+\int_0^1 \operatorname{div} v_\theta(X_t,t)\,dt.
+$$
+
+这个公式来自上一节的连续性方程，但它的两个组成部分都离不开样本 ODE 的积分形式。
+
+第一个东西是数据点在 base distribution 下的原像：
+
+$$
+x_0=\phi_{1\to 0}(x_1).
+$$
+
+第二个东西是同一条轨迹上的散度积分。CNF 没有显式的 `f^{-1}`，所以只能从 `t=1` 反向解 ODE 到 `t=0`：
+
+$$
+\frac{dX_t}{dt}=v_\theta(X_t,t),\quad X_1=x_1.
+$$
+
+这里“反向”不是换一个新模型，而是用同一个速度场、让数值 ODE solver 从 `t=1` 积分到 `t=0`。如果改用正向的反向时间变量 `tau=1-t`，则等价于：
+
+$$
+\frac{dY_\tau}{d\tau}
+=
+-v_\theta(Y_\tau,1-\tau).
+$$
+
+散度积分也必须沿这条轨迹算，因为 integrand 是：
+
+$$
+\operatorname{div}v_\theta(X_t,t),
+$$
+
+它依赖正在求解的 `X_t`。因此实际训练不是“只用连续性方程、没有用积分形式”；更准确地说，训练用连续性方程给出 log-density 更新式，同时用样本 ODE 积分得到 `x_0` 和整条 `X_t` 轨迹。为了保证两个量沿同一路径计算，CNF 通常把状态扩展成 augmented state：
+
+$$
+(X_t,A_t).
+$$
+
+其中 `A_t` 是散度积分累加器。设：
+
+$$
+A_1=0,\quad
+\frac{dA_t}{dt}=-\operatorname{div}v_\theta(X_t,t).
+$$
+
+从 `t=1` 积分到 `t=0` 得到：
+
+$$
+A_0
+=
+\int_0^1 \operatorname{div}v_\theta(X_t,t)\,dt.
+$$
+
+于是：
+
+$$
+\log p_\theta(x_1)
+=
+\log p_0(X_0)-A_0.
+$$
+
+这就是“同时积分”的作用：`X_t` 分量负责求解样本 ODE，找到 `x_0` 和路径上的位置；`A_t` 分量负责按连续性方程给出的 `dA_t/dt=-div v` 沿同一条路径更新，反向积分后得到正向散度积分。CNF 里的 simulation 指的就是这种数值模拟当前速度场定义的连续动力系统；它发生在每次 likelihood 前向计算中。
+
+教学版代码如下：
 
 ```python
-def cnf_augmented_dynamics(t, state, velocity_model):
-    x_t, logp_t = state
+def cnf_likelihood(data_x1, velocity_model, base_dist, ode_solver):
+    # data_x1 是训练数据点，位于 t=1 的数据端。
+    # divergence_integral 从 0 开始，负责累计 int_0^1 div v_theta(X_t,t) dt。
+    init_state = (data_x1, torch.zeros(data_x1.shape[0], device=data_x1.device))
 
-    # velocity_model 输出 ODE 右端项 v_theta(x_t, t)。
-    v_t = velocity_model(x_t, t)
+    def augmented_dynamics(t, state):
+        x_t, accumulator_t = state
 
-    # divergence 是 CNF 的密度修正项。高维图像里直接求完整 Jacobian 太贵，
-    # 常用 Hutchinson trace estimator 估计 Tr(dv/dx)。
-    div_v = estimate_divergence_with_hutchinson(v_t, x_t)
+        # v_t 是当前模型定义的样本 ODE 速度场，决定 X_t 这条轨迹怎样移动。
+        v_t = velocity_model(x_t, t)
 
-    # 沿样本轨迹的 log-density 变化率是 -div(v)。
-    dlogp_dt = -div_v
-    return v_t, dlogp_dt
+        # div_v 是当前点的散度。高维时直接求 trace 很贵，
+        # 实际常用 Hutchinson estimator 近似 Tr(dv/dx)。
+        div_v = estimate_divergence_with_hutchinson(v_t, x_t)
+
+        # 这个 ODE 是按原始时间 t 写的：
+        # dX_t/dt = v_t
+        # dA_t/dt = -div_v
+        # 第一行来自样本运动方程；第二行来自连续性方程沿样本轨迹的 log-density 更新。
+        # 当 solver 从 t=1 积分到 t=0 时，返回的 A_0 等于 forward 方向的散度积分。
+        return v_t, -div_v
+
+    # 反向求解 augmented ODE：从数据端 x_1 找回 base 端 x_0，
+    # 同时沿同一路径累计散度积分。
+    x0, divergence_integral = ode_solver(
+        augmented_dynamics,
+        init_state,
+        t_start=1.0,
+        t_end=0.0,
+    )
+
+    # base_dist.log_prob(x0) 对应 log p_0(x_0)。
+    # divergence_integral 对应 int_0^1 div v_theta(X_t,t) dt。
+    log_px1 = base_dist.log_prob(x0) - divergence_integral
+    return log_px1
 ```
 
-CNF 放松了显式可逆网络的结构要求，但训练和似然评估都要数值积分；Flow Matching 后续的动机之一，就是保留 ODE 生成能力，同时把训练改成 simulation-free 的监督回归。
+这段代码里，真正昂贵的地方有两个：
+
+- ODE solver 需要多次调用 `velocity_model` 才能从 `x_1` 走到 `x_0`。
+- 每个 solver step 还要估计一次散度 `div_v`。
+
+### NF / CNF 和 VAE 的似然差别
+
+NF 和 CNF 都属于 exact likelihood model：模型设计保证 `log p_\theta(x)` 可以被精确写出，区别只在于一个用离散 log-det，一个用连续散度积分。
+
+VAE 也在建模 likelihood，但一般不能直接计算：
+
+$$
+\log p_\theta(x)
+=
+\log\int p_\theta(x|z)p(z)\,dz.
+$$
+
+因此 VAE 优化的是 ELBO：
+
+$$
+\log p_\theta(x)
+\ge
+\mathbb{E}_{q_\phi(z|x)}
+\left[
+\log p_\theta(x|z)
+\right]
+-
+D_\mathrm{KL}
+\left(
+q_\phi(z|x)\|p(z)
+\right).
+$$
+
+所以三者可以这样区分：
+
+| 模型 | 训练目标             | 是否直接得到 `log p_theta(x)` | 主要代价                            |
+| ---- | -------------------- | ----------------------------- | ----------------------------------- |
+| NF   | exact log-likelihood | 是                            | 设计 `K` 个可逆层和逐层可算 log-det |
+| CNF  | exact log-likelihood | 是                            | 数值解 ODE 和散度积分               |
+| VAE  | ELBO，下界           | 通常不是                      | 有 inference network 和 ELBO gap    |
+
+“NF/CNF 解决 VAE 的缺陷”只应理解为：它们避免了 VAE 的 ELBO gap，可以做 exact likelihood training。它不意味着 NF/CNF 在生成质量、训练稳定性或表达效率上全面优于 VAE。
+
+### 从 CNF 到 Flow Matching：同样 ODE，不同训练问题
+
+CNF 和 Flow Matching 的生成器都可以写成：
+
+$$
+\frac{dX_t}{dt}=v_\theta(X_t,t).
+$$
+
+差别不在“有没有 ODE”，而在训练时路径由谁给出。CNF 把 `v_\theta` 当作当前模型本身；给定参数 `theta`，它诱导模型密度路径：
+
+$$
+p_t^\theta=(\phi_t^\theta)_\#p_0.
+$$
+
+最大似然训练要沿当前模型轨迹计算数据点概率：
+
+$$
+\log p_\theta(x_1)
+=
+\log p_0(x_0)
+-
+\int_0^1 \operatorname{div}v_\theta(X_t,t)\,dt,
+\quad
+x_0=\phi_{1\to 0}^\theta(x_1).
+$$
+
+这里的 `x_0` 和 `X_t` 都由当前 `v_\theta` 决定，所以训练时必须反向 simulation 当前模型 ODE，并沿模型轨迹累计散度。Flow Matching 换了训练问题：先指定可采样概率路径，再监督模型学习生成这条路径的速度。以 CondOT 线性路径为例：
+
+$$
+X_t=(1-t)X_0+tX_1,\quad
+U_t=X_1-X_0.
+$$
+
+训练目标直接变成速度回归：
+
+$$
+\mathcal L_\mathrm{CFM}(\theta)
+=
+\mathbb E
+\left[
+\left\|v_\theta(X_t,t)-U_t\right\|^2
+\right].
+$$
+
+模型 `v_\theta` 只在采样点 `X_t` 上被调用一次，不需要沿当前模型轨迹反向找 `x_0`，也不需要计算 `div v_\theta`。Flow Matching 的 **simulation-free training** 指的正是训练阶段不模拟当前模型 ODE；生成阶段仍然要从 `X_0~p_0` 出发积分学到的 ODE。
+
+| 问题             | CNF 最大似然                    | Flow Matching               |
+| ---------------- | ------------------------------- | --------------------------- |
+| 训练路径         | 当前 `v_theta` 诱导，需反向积分 | 预设路径公式直接采样        |
+| 训练 target      | `log p_theta(x)`                | 条件速度 `U_t` 或条件速度场 |
+| 散度项           | 需要                            | 通常不需要                  |
+| exact likelihood | 直接优化                        | 不直接优化                  |
+
+Flow Matching 的动机因此很具体：保留 CNF 的连续流生成形式，避开 CNF likelihood 训练中最贵的反向 ODE simulation 和散度积分，把训练改造成可并行采样的速度回归。代价是训练目标不再直接最大化 exact likelihood；它依赖后面的连续性方程和边缘化定理来保证学到的边缘速度场确实生成预设的概率路径。
 
 ## 连续性方程和两个核心定理
 
 ### 速度场如何生成概率路径
 
-给定速度场 `u_t(x)`，样本轨迹满足：
+CNF 小节已经从连续性方程推出了 density change。Flow Matching 使用的是同一个守恒方程，只是这里的 `u_t` 先被看成目标概率路径的真实速度，而不是待训练模型。给定速度场 `u_t(x)`，样本轨迹满足：
 
 $$
 \frac{dX_t}{dt}=u_t(X_t).
@@ -150,7 +579,7 @@ $$
 \partial_t p_t(x) + \nabla\cdot\left(p_t(x)u_t(x)\right)=0.
 $$
 
-弱形式证明更直观。取任意平滑测试函数 `phi`：
+弱形式能说明它为什么代表概率质量守恒。取任意平滑测试函数 `phi`：
 
 $$
 \frac{d}{dt}\mathbb{E}[\phi(X_t)]
@@ -165,32 +594,32 @@ $$
 = -\int \phi(x)\nabla\cdot(p_tu_t)(x)\,dx.
 $$
 
-由于这对任意 `phi` 成立，就得到连续性方程。它的含义不是“某个粒子守恒”，而是“概率质量沿速度场流动时不会凭空产生或消失”。
+由于这对任意 `phi` 成立，就得到连续性方程。FM 后面的定理都在使用这个事实：只要 `u_t` 和 `p_t` 满足这条方程，ODE 流就能生成这条概率路径。
 
 ### 条件路径边缘化定理
 
-Flow Matching 实际可操作的是条件路径。给定数据点 `z ~ q(z)`，构造条件概率路径 `p_t(x|z)` 和生成它的条件速度场 `u_t(x|z)`。边缘路径定义为：
+Flow Matching 实际可操作的是条件路径。给定数据端样本 `x_1~p_1`，构造条件概率路径 `p_t(x|x_1)` 和生成它的条件速度场 `u_t(x|x_1)`。边缘路径定义为：
 
 $$
-p_t(x)=\int p_t(x|z)q(z)\,dz.
+p_t(x)=\int p_t(x|x_1)p_1(x_1)\,dx_1.
 $$
 
 边缘速度场定义为条件速度场的后验加权平均：
 
 $$
 u_t(x)
-= \int u_t(x|z)\frac{p_t(x|z)q(z)}{p_t(x)}\,dz.
+= \int u_t(x|x_1)\frac{p_t(x|x_1)p_1(x_1)}{p_t(x)}\,dx_1.
 $$
 
-这个公式里的权重就是 `z` 在给定 `x_t=x` 后的后验密度。把它代回连续性方程：
+这个公式里的权重就是 `x_1` 在给定 `X_t=x` 后的后验密度。把它代回连续性方程：
 
 $$
 \begin{aligned}
 \partial_t p_t(x)
-&= \int \partial_t p_t(x|z)q(z)\,dz \\
-&= -\int \nabla\cdot\left(p_t(x|z)u_t(x|z)\right)q(z)\,dz \\
+&= \int \partial_t p_t(x|x_1)p_1(x_1)\,dx_1 \\
+&= -\int \nabla\cdot\left(p_t(x|x_1)u_t(x|x_1)\right)p_1(x_1)\,dx_1 \\
 &= -\nabla\cdot\left(
-\int p_t(x|z)u_t(x|z)q(z)\,dz
+\int p_t(x|x_1)u_t(x|x_1)p_1(x_1)\,dx_1
 \right) \\
 &= -\nabla\cdot\left(p_t(x)u_t(x)\right).
 \end{aligned}
@@ -214,13 +643,13 @@ $$
 
 $$
 \mathcal{L}_\mathrm{CFM}(\theta)
-= \mathbb{E}_{t,z\sim q,x\sim p_t(\cdot|z)}
+= \mathbb{E}_{t,x_1\sim p_1,x\sim p_t(\cdot|x_1)}
 \left[
-\left\|v_\theta(x,t)-u_t(x|z)\right\|^2
+\left\|v_\theta(x,t)-u_t(x|x_1)\right\|^2
 \right].
 $$
 
-令随机变量 `U = u_t(X_t|Z)`，则边缘速度场满足：
+令随机变量 `U = u_t(X_t|X_1)`，则边缘速度场满足：
 
 $$
 u_t(x)=\mathbb{E}[U|X_t=x].
@@ -261,12 +690,14 @@ $$
 
 ## Flow Matching
 
+Flow Matching 接住的是上一节的动机：生成时仍然使用连续流 ODE，但训练时不再用当前模型的 likelihood 反推数据点从哪里来。它先选定一族可采样路径，再把每个时间切片上的速度写成监督信号。下面的 Gaussian path 和 CondOT path 都是在回答同一个问题：怎样构造 `X_t` 和对应的速度 target，让模型学到的边缘速度场能把 `p_0` 推到 `p_1`。
+
 ### Gaussian 条件路径
 
 Flow Matching 原论文把一大类路径写成 Gaussian 条件概率路径：
 
 $$
-p_t(x|z)=\mathcal{N}\left(x\mid \alpha_t z,\ \beta_t^2 I\right),
+p_t(x|x_1)=\mathcal{N}\left(x\mid \alpha_t x_1,\ \beta_t^2 I\right),
 $$
 
 其中：
@@ -278,24 +709,38 @@ $$
 采样写成重参数化形式：
 
 $$
-x_t=\alpha_t z+\beta_t\epsilon,\quad \epsilon\sim\mathcal{N}(0,I).
+X_t=\alpha_t X_1+\beta_t X_0,\quad X_0\sim\mathcal{N}(0,I).
 $$
 
-条件速度场由 `x_t` 对时间求导得到：
+这里要区分两种写法。第一种是 **训练采样写法**：一次训练样本会同时采到 `(X_0,X_1,t)`，所以隐藏的源噪声 `X_0` 是已知的。固定这一次采样里的 `X_0` 和 `X_1`，只让时间 `t` 变化，对路径求导：
 
 $$
-u_t(x_t|z)=\dot{\alpha}_t z+\dot{\beta}_t\epsilon.
+\frac{dX_t}{dt}
+=
+\dot{\alpha}_t X_1+\dot{\beta}_t X_0.
 $$
 
-如果要写成 `x` 和 `z` 的函数，利用 `epsilon=(x-\alpha_t z)/\beta_t`：
+因此路径上的条件速度 target 是：
 
 $$
-u_t(x|z)
-= \left(\dot{\alpha}_t-\frac{\dot{\beta}_t}{\beta_t}\alpha_t\right)z
+u_t(X_t|X_1)=\dot{\alpha}_t X_1+\dot{\beta}_t X_0.
+$$
+
+第二种是 **速度场函数写法**：数学上希望把条件速度写成 `u_t(x|x_1)`，也就是只依赖当前位置、时间和条件数据。此时网络输入通常看不到生成 `x` 的隐藏 `x_0`，所以要从重参数化公式反解：
+
+$$
+x_0=\frac{x-\alpha_t x_1}{\beta_t}.
+$$
+
+代回路径速度：
+
+$$
+u_t(x|x_1)
+= \left(\dot{\alpha}_t-\frac{\dot{\beta}_t}{\beta_t}\alpha_t\right)x_1
 + \frac{\dot{\beta}_t}{\beta_t}x.
 $$
 
-这一行是教程和代码对齐的关键：代码里最稳定的写法通常不是先还原上式，而是直接用重参数化得到 `target = alpha_dot * z + beta_dot * eps`。
+这两种写法描述的是同一个条件速度场。代码里最稳定的写法通常是第一种：既然训练采样时已经知道 `x0`，就直接用 `target = alpha_dot * x1 + beta_dot * x0`，避免在 `beta_t` 很小时显式除以 `beta_t`。
 
 ### CondOT 线性路径
 
@@ -308,17 +753,29 @@ $$
 于是：
 
 $$
-x_t=(1-t)\epsilon+t z,\quad
-u_t(x_t|z)=z-\epsilon.
+X_t=(1-t)X_0+tX_1,\quad
+u_t(X_t|X_1)=X_1-X_0.
 $$
 
-等价地，若只给定 `x_t`：
+这就是上面 Gaussian path 的特殊情况：固定 `X_0,X_1` 对 `t` 求导，直接得到常数速度 `X_1-X_0`。若只给定当前位置 `x` 和条件数据 `x_1`，先由：
 
 $$
-u_t(x|z)=\frac{z-x}{1-t},\quad t<1.
+x=(1-t)x_0+t x_1
 $$
 
-这两个式子不要混用错：`x_t=(1-t)eps+t z` 对应的方差是 `(1-t)^2I`，不是 `(1-t^2)I`。
+反解：
+
+$$
+x_0=\frac{x-tx_1}{1-t}.
+$$
+
+再代入 `x_1-x_0`，得到函数形式：
+
+$$
+u_t(x|x_1)=\frac{x_1-x}{1-t},\quad t\lt 1.
+$$
+
+这两个式子不要混用错：`X_t=(1-t)X_0+tX_1` 对应的条件方差是 `(1-t)^2I`，不是 `(1-t^2)I`。
 
 ### 训练目标和代码对照
 
@@ -327,10 +784,10 @@ CondOT CFM loss：
 $$
 \mathcal{L}_\mathrm{CFM}(\theta)
 =
-\mathbb{E}_{t,z,\epsilon}
+\mathbb{E}_{t,X_0,X_1}
 \left[
 \left\|
-v_\theta((1-t)\epsilon+tz,t)-(z-\epsilon)
+v_\theta((1-t)X_0+tX_1,t)-(X_1-X_0)
 \right\|^2
 \right].
 $$
@@ -339,31 +796,31 @@ $$
 
 ```python
 def condot_flow_matching_loss(model, data_batch):
-    # data_batch: z ~ p_data，形状可以是 [B, C, H, W] 或 [B, D]。
-    z = data_batch
+    # x1 是数据端样本，来自 p_1 或 p_data；形状可以是 [B, C, H, W] 或 [B, D]。
+    x1 = data_batch
 
-    # epsilon 是源分布样本。CondOT 线性路径从 epsilon 出发，走向数据 z。
-    eps = torch.randn_like(z)
+    # x0 是源分布样本。CondOT 线性路径从 x0 出发，走向数据 x1。
+    x0 = torch.randn_like(x1)
 
     # 每个样本单独抽时间，避免模型只学习少数固定时间切片。
     # view_shape 用来把 [B] 的时间广播到图像/向量维度。
-    t = torch.rand(z.shape[0], device=z.device)
-    view_shape = (z.shape[0],) + (1,) * (z.ndim - 1)
+    t = torch.rand(x1.shape[0], device=x1.device)
+    view_shape = (x1.shape[0],) + (1,) * (x1.ndim - 1)
     t_view = t.view(view_shape)
 
-    # 条件路径样本 x_t = (1-t) eps + t z。
-    # 这个对象在公式里服从 p_t(.|z)，在代码里就是模型的 noisy input。
-    x_t = (1.0 - t_view) * eps + t_view * z
+    # 条件路径样本 x_t = (1-t)x0 + t x1。
+    # 这个对象在公式里服从 p_t(.|x1)，在代码里就是模型的 noisy input。
+    x_t = (1.0 - t_view) * x0 + t_view * x1
 
-    # 条件速度场是路径对时间的导数：d/dt [(1-t)eps + t z] = z - eps。
+    # 条件速度场是路径对时间的导数：d/dt [(1-t)x0 + t x1] = x1 - x0。
     # 梯度不需要流向 target；监督信号来自手工构造的概率路径。
-    target_velocity = z - eps
+    target_velocity = x1 - x0
 
     pred_velocity = model(x_t, t)
     return torch.mean((pred_velocity - target_velocity) ** 2)
 ```
 
-`Flow Matching Guide and Code` 里的库接口也是同一件事：`path.sample(t, x_0, x_1)` 返回 `x_t` 和 `dx_t`，然后用 `MSE(velocity_model(x_t,t), dx_t)`。`dx_t` 就是公式里的 `dot psi_t`。
+`Flow Matching Guide and Code` 里的库接口也是同一件事：`path.sample(t, x_0, x_1)` 返回 `x_t` 和 `dx_t`，然后用 `MSE(velocity_model(x_t,t), dx_t)`。在 CondOT 中，`dx_t` 就是 `x_1-x_0`。
 
 ### 推理
 
@@ -392,53 +849,21 @@ v_\theta(X_t,t)+v_\theta(\tilde{X}_{t+h},t+h)
 \right].
 $$
 
-推理代码骨架：
-
-```python
-@torch.no_grad()
-def sample_flow_matching(model, shape, steps):
-    x = torch.randn(shape)
-    times = torch.linspace(0.0, 1.0, steps + 1, device=x.device)
-
-    for t0, t1 in zip(times[:-1], times[1:]):
-        h = t1 - t0
-        t_batch = t0.expand(shape[0])
-
-        # Euler 是一阶 ODE 求解器；路径越直、速度场越平滑，少步数误差越小。
-        v = model(x, t_batch)
-        x = x + h * v
-
-    return x
-```
-
-FM 的“simulation-free”只指训练时不需要 rollout ODE；生成时仍要积分。Rectified Flow 和 MeanFlow 主要就是围绕这一点做推理加速。
+FM 的“simulation-free”只指训练时不需要 rollout ODE；生成时仍要积分。完整的 Euler/Heun/midpoint 采样代码和 NFE 计数放在后面的“推理、加速和工程取舍”里。Rectified Flow 和 MeanFlow 主要就是围绕这一点做推理加速。
 
 ## 概率路径设计：Gaussian、OT 与 CondOT
 
-概率路径设计属于 Flow Matching 的核心问题：先规定 `p_t` 应该怎样从噪声走到数据，再推导生成它的速度场和训练 target。Normalizing Flow 关注的是可逆变换的密度；Flow Matching 关注的是“我想让概率质量沿哪条路径走”。
+概率路径设计是 Flow Matching 区别于 CNF 最大似然训练的核心：先规定 `p_t` 怎样从 `p_0` 走到 `p_1`，再推导生成这条路径的速度 target。上一节已经给出 Gaussian/CondOT 的训练公式；这里只比较三类路径的含义和边界。
 
 ### Gaussian path：把 diffusion 写成概率路径
 
-Gaussian 条件路径统一写成：
-
-$$
-p_t(x|z)=\mathcal{N}\left(x\mid \alpha_t z,\ \beta_t^2 I\right).
-$$
-
-它的训练 target 是：
-
-$$
-u_t(x_t|z)=\dot{\alpha}_t z+\dot{\beta}_t\epsilon,\quad
-x_t=\alpha_t z+\beta_t\epsilon.
-$$
-
-这里的重点不只是“加噪”。`alpha_t` 决定数据成分保留多少，`beta_t` 决定噪声尺度；不同 diffusion noise schedule 可以被看成不同 Gaussian probability path。Flow Matching 的好处是可以绕开 SDE 反向推导，直接指定路径并回归对应速度。
+Gaussian path 用 `alpha_t` 控制数据成分、用 `beta_t` 控制噪声尺度。它的重点不只是“加噪”，而是把 diffusion/noise schedule 写成一条确定的概率路径，再用 `dot alpha_t` 和 `dot beta_t` 直接给出速度 target。Flow Matching 因此可以绕开 SDE 反向推导，直接指定路径并回归对应速度。
 
 常见 VP/VE diffusion path 和 FM 的关系可以这样看：
 
 - VP path：数据系数随时间衰减，方差保持在受控范围内，适合和 score-based diffusion 的概率流 ODE 对齐。
 - VE path：均值常以数据点为中心，噪声方差从大到小变化，强调从大噪声尺度逐步去噪。
-- CondOT path：取 `alpha_t=t, beta_t=1-t`，条件路径是直线，target 退化成最简单的 `z-eps`。
+- CondOT path：取 `alpha_t=t, beta_t=1-t`，条件路径是直线，target 退化成最简单的 `X_1-X_0`。
 
 ### OT path：最小动能的边缘概率路径
 
@@ -456,16 +881,16 @@ p_0=p,\quad p_1=q,\quad
 \partial_t p_t+\nabla\cdot(p_tu_t)=0.
 $$
 
-如果存在从 `p_0` 到 `p_1` 的 OT map `phi`，对应的 displacement interpolation 是：
+如果存在从 `p_0` 到 `p_1` 的 OT map `T`，对应的 displacement interpolation 是：
 
 $$
-\psi_t^\star(x)=(1-t)x+t\phi(x).
+\psi_t^\star(x_0)=(1-t)x_0+tT(x_0).
 $$
 
 沿这条路径，每个源点的速度是常数：
 
 $$
-\frac{d}{dt}\psi_t^\star(x)=\phi(x)-x.
+\frac{d}{dt}\psi_t^\star(x_0)=T(x_0)-x_0.
 $$
 
 这解释了为什么 OT 路径常被认为更适合少步 ODE 采样：在理想 OT map 下，样本轨迹是直线，Euler 一步就能精确到达终点。难点是，真实数据分布下的全局 OT map 通常不可得；训练集里也不知道哪个噪声点应该配哪个数据点。
@@ -475,23 +900,23 @@ $$
 Flow Matching 原论文里的 OT 条件路径常写成：
 
 $$
-\psi_t(x_0|z)=(1-t)x_0+tz,
+\psi_t(x_0|x_1)=(1-t)x_0+tx_1,
 $$
 
-其中 `x_0~N(0,I)`，`z~p_data`。这条条件路径对固定 `z` 来说是“从噪声到该数据点”的线性缩放高斯：
+其中 `x_0~N(0,I)`，`x_1~p_1`。这条条件路径对固定 `x_1` 来说是“从噪声到该数据点”的线性缩放高斯：
 
 $$
-p_t(x|z)=\mathcal{N}\left(x\mid tz,\ (1-t)^2I\right).
+p_t(x|x_1)=\mathcal{N}\left(x\mid tx_1,\ (1-t)^2I\right).
 $$
 
 它被称为 conditional OT / CondOT，是因为在“源分布到单点 Dirac delta”的条件问题里，线性收缩就是最自然的 OT 路径。它带来的代码 target 很干净：
 
 $$
-x_t=(1-t)\epsilon+tz,\quad
-\dot{x}_t=z-\epsilon.
+X_t=(1-t)X_0+tX_1,\quad
+\dot{X}_t=X_1-X_0.
 $$
 
-但它不是在说“随机抽一个噪声和随机抽一个数据，二者已经是全局最优传输配对”。独立 coupling 下的 `epsilon -> z` 只是一个训练用条件构造；边缘速度场会把所有条件速度做后验平均。Rectified Flow 的 reflow 正是沿着这个缺口继续推进：先训练一个流，再用流生成的新 coupling 重新训练，让耦合更接近确定性传输。
+但它不是在说“随机抽一个噪声和随机抽一个数据，二者已经是全局最优传输配对”。独立 coupling 下的 `X_0 -> X_1` 只是一个训练用条件构造；边缘速度场会把所有条件速度做后验平均。Rectified Flow 的 reflow 正是沿着这个缺口继续推进：先训练一个流，再用流生成的新 coupling 重新训练，让耦合更接近确定性传输。
 
 ## Stochastic Interpolants
 
@@ -566,7 +991,7 @@ $$
 ```python
 def stochastic_interpolant_velocity_loss(model_b, x0, x1):
     # x0 和 x1 来自某个 coupling。独立 coupling、OT coupling、reflow coupling 都可以。
-    z = torch.randn_like(x0)
+    bridge_noise = torch.randn_like(x0)
     t = torch.rand(x0.shape[0], device=x0.device)
     view = (x0.shape[0],) + (1,) * (x0.ndim - 1)
 
@@ -574,16 +999,16 @@ def stochastic_interpolant_velocity_loss(model_b, x0, x1):
     alpha_dot, beta_dot, gamma_dot = schedule_derivatives(t, view)
 
     # I_t 是主对象：所有 loss 都在 I_t 的边缘密度 rho_t 上训练。
-    i_t = alpha * x0 + beta * x1 + gamma * z
+    i_t = alpha * x0 + beta * x1 + gamma * bridge_noise
 
     # 速度监督来自插值对时间的导数，不需要 rollout ODE。
-    target_b = alpha_dot * x0 + beta_dot * x1 + gamma_dot * z
+    target_b = alpha_dot * x0 + beta_dot * x1 + gamma_dot * bridge_noise
 
     pred_b = model_b(i_t, t)
     return torch.mean((pred_b - target_b) ** 2)
 ```
 
-若取 `alpha_t=1-t, beta_t=t, gamma_t=0`，并令 `x0=eps, x1=data`，这个 loss 就回到 Rectified Flow / CondOT 的直线速度回归。
+若取 `alpha_t=1-t, beta_t=t, gamma_t=0`，并令 `x0` 来自源分布、`x1` 来自数据分布，这个 loss 就回到 Rectified Flow / CondOT 的直线速度回归。
 
 ### Score：随机采样时多出来的对象
 
@@ -611,16 +1036,16 @@ $$
 
 ```python
 def stochastic_interpolant_score_loss(model_s, x0, x1, eps=1e-4):
-    z = torch.randn_like(x0)
+    bridge_noise = torch.randn_like(x0)
 
     # score target 里有 1/gamma_t，通常不要在端点采样。
     t = eps + (1.0 - 2.0 * eps) * torch.rand(x0.shape[0], device=x0.device)
     view = (x0.shape[0],) + (1,) * (x0.ndim - 1)
 
     alpha, beta, gamma = schedule_values(t, view)
-    i_t = alpha * x0 + beta * x1 + gamma * z
+    i_t = alpha * x0 + beta * x1 + gamma * bridge_noise
 
-    target_s = -z / gamma
+    target_s = -bridge_noise / gamma
     pred_s = model_s(i_t, t)
     return torch.mean((pred_s - target_s) ** 2)
 ```
@@ -654,7 +1079,7 @@ $$
 | 选择                               | 回到哪类方法                     | 解释                                    |
 | ---------------------------------- | -------------------------------- | --------------------------------------- |
 | `gamma_t=0`，线性 `alpha,beta`     | Rectified Flow / CondOT 速度回归 | target 是 `X_1-X_0`                     |
-| 固定 `X_1=z`，`X_0~N(0,I)`         | Flow Matching 的条件路径         | 条件路径边缘化得到整体速度              |
+| 固定 `X_1=x_1`，`X_0~N(0,I)`       | Flow Matching 的条件路径         | 条件路径边缘化得到整体速度              |
 | `gamma_t>0`，同时学 `b_t` 和 `s_t` | diffusion / score-based 采样视角 | ODE 与 SDE 可共享同一 `rho_t`           |
 | 改变 `(X_0,X_1)` coupling          | OT、mini-batch OT、reflow 等     | coupling 改变速度 target 和轨迹交叉程度 |
 
@@ -668,7 +1093,13 @@ $$
 (X_0,X_1)\sim \pi,\quad X_0\sim \pi_0,\quad X_1\sim \pi_1.
 $$
 
-在生成任务里，最常见的初始 coupling 是独立配对：`X_0` 是高斯噪声，`X_1` 是数据样本。给定一对样本，定义直线插值：
+这里的 coupling 指的是一个联合分布 `pi(X_0,X_1)`，它的两个边缘分布分别是 `pi_0` 和 `pi_1`。所以“独立配对”不是“没有 coupling”，而是最简单的 **product coupling**：
+
+$$
+\pi(X_0,X_1)=\pi_0(X_0)\pi_1(X_1).
+$$
+
+在生成任务里，最常见的初始 coupling 就是这种独立配对：`X_0` 是高斯噪声，`X_1` 是数据样本，二者各自随机采样后组成一对。给定一对样本，定义直线插值：
 
 $$
 X_t=(1-t)X_0+tX_1.
@@ -697,7 +1128,7 @@ $$
 v^\star(x,t)=\mathbb{E}[X_1-X_0\mid X_t=x].
 $$
 
-这个条件期望是理解 Rectified Flow 的第一道门槛：模型不是拿着隐藏的 `(X_0,X_1)` 配对做查询，也不是记住每个训练 pair 的直线；在同一个空间点 `x` 和同一时间 `t` 上，如果许多直线插值交叉，模型只能输出这些候选速度的平均结果。
+这个条件期望是理解 Rectified Flow 的第一道门槛：`X_1-X_0` 是 sample-level 的速度监督标签；模型最终学到的不是每条训练 pair 的私有直线，而是边缘化后的单值速度场。在同一个空间点 `x` 和同一时间 `t` 上，如果许多直线插值交叉，模型只能输出这些候选速度的平均结果。
 
 ### 动机：把非因果直线插值变成可采样的 ODE 流
 
@@ -728,9 +1159,17 @@ $$
 
 所以“直线”在 Rectified Flow 里更像训练信号和优化方向，不是第一轮模型自动获得的逐样本几何保证。真正让低步数采样变稳的，是后面的 reflow：用已经学到的 ODE 重新生成 coupling，再训练下一轮。
 
+第一轮训练完成后，学到的单值速度场确实会定义一套确定的 ODE 路线：
+
+$$
+\frac{dZ_t}{dt}=v_\theta(Z_t,t),\quad Z_0=X_0.
+$$
+
+给定同一个初始点 `X_0` 和同一个 ODE solver，整条轨迹 `Z_t` 以及终点 `Z_1` 都是确定的。这和“速度场是候选速度的平均结果”不矛盾：平均发生在训练出的向量场定义上，ODE 再沿这个已经确定的向量场积分。关键是，`Z_1` 通常不是第一轮 independent coupling 里随机配给这个 `X_0` 的原始数据点 `X_1`；它是模型自己根据单值速度场实际走到的终点。理想情况下，`Z_1` 的整体分布接近数据分布 `p_1`，但逐样本的“目的地”已经由模型流重新分配。
+
 ### 1-Rectified Flow：第一轮从独立 coupling 开始
 
-如果 `X_0=epsilon~N(0,I)`、`X_1=z~p_data` 且采用独立耦合，第一轮训练常被称为 1-Rectified Flow。它和 CondOT CFM 在代码形态上非常接近：
+如果 `X_0~N(0,I)`、`X_1~p_1` 且采用独立 product coupling，第一轮训练常被称为 1-Rectified Flow。在这个设定下，它和 CondOT CFM 的训练 loss 与教学代码可以完全相同：
 
 ```python
 def rectified_flow_loss(model, x1):
@@ -738,17 +1177,23 @@ def rectified_flow_loss(model, x1):
     t = torch.rand(x1.shape[0], device=x1.device)
     t_view = t.view((x1.shape[0],) + (1,) * (x1.ndim - 1))
 
-    # 线性插值路径。和 CondOT 的 x_t=(1-t)eps+t z 是同一个对象。
+    # 线性插值路径。和 CondOT 的 x_t=(1-t)x0+t x1 是同一个对象。
     x_t = (1.0 - t_view) * x0 + t_view * x1
 
-    # Rectified Flow 强调的是耦合对的直线速度。
-    # 若耦合改变，target 也随之改变。
+    # Rectified Flow 强调的是当前 coupling 下这一对样本的直线速度 target。
+    # 若 coupling 改变，成对关系改变，target 也随之改变。
     target = x1 - x0
     pred = model(x_t, t)
     return torch.mean((pred - target) ** 2)
 ```
 
-这段代码和 CondOT 的区别主要在解释重心：CondOT 说“这是条件概率路径的速度”；Rectified Flow 说“这是当前 coupling 的直线运输信号，下一步我要把 coupling rectified”。
+这段代码和 CondOT CFM 的差别不在这一轮的张量计算，而在解释对象和后续策略：
+
+- CondOT CFM 说：`X_1-X_0` 是条件概率路径 `p_t(x|x_1)` 的条件速度 target；通过 CFM/FM 等价性，模型最优解是边缘速度场。
+- 1-Rectified Flow 说：`X_1-X_0` 是当前 coupling 诱导的 pairwise 直线速度 target；模型最优解同样是边缘化后的单值速度场。
+- Rectified Flow 额外关心下一步：用已经学到的 ODE 重新构造 coupling，让 pairwise 直线更接近模型实际采样轨迹。
+
+因此，在独立 coupling + 线性路径下，CFM 和 1-Rectified Flow 学到的都是边缘化后的单值速度场。区别是 CondOT 把这段训练放进“条件路径边缘化”的框架里，Rectified Flow 把同一段训练看作 reflow 迭代的第一轮。
 
 ### 2-Rectified Flow / Reflow：重新构造更好的 coupling
 
@@ -758,12 +1203,20 @@ $$
 Z_1=\operatorname{ODEsolve}(X_0;v_\theta),\quad X_0\sim\pi_0.
 $$
 
-Reflow 用新的 coupling `(X_0,Z_1)` 再训练同样的直线目标：
+如果 ODE solver 是确定性的，那么每个采样到的 `X_0` 会得到一个对应的 `Z_1`；在一个 batch 里，新的 pair 是一一对应的 `(X_0^{(i)},Z_1^{(i)})`。Reflow 用这些 pair 形成新的 coupling，再训练同样的直线目标：
 
 $$
 X_t^\mathrm{new}=(1-t)X_0+tZ_1,\quad
 target=Z_1-X_0.
 $$
+
+这里最容易误解的是：reflow 不是让 student 复现 teacher 的整条弯曲轨迹。它只保留 teacher 选择的起点和终点 `(X_0,Z_1)`，然后把这两个端点之间的直线速度 `Z_1-X_0` 当作新的监督。也就是说：
+
+- teacher 的作用是重新分配“这个 `X_0` 应该去哪个终点”。
+- student 的训练目标是“能不能更直接地从 `X_0` 去 teacher 选出的 `Z_1`”。
+- 如果 teacher 轨迹本来就是直线，reflow 可能变化很小；如果 teacher 轨迹明显弯，student 的直线监督就不会复制 teacher 的中间速度。
+
+这就是为什么“同样是直线目标”仍可能变好：第一轮的 pair 是随机噪声配随机数据，直线之间容易要求一个单值 ODE 在交叉后继续分叉；第二轮的 pair 来自同一个 teacher ODE 的确定性映射，终点分配更符合一个单值流实际能执行的搬运关系。直线段本身仍可能交叉，有限模型和有限训练下也不保证每轮都单调变好；reflow 的作用是用更自洽的 pair 重新训练，让速度场更接近“从起点直接指向 teacher 终点”的方向。
 
 教程级 reflow 伪代码：
 
@@ -775,20 +1228,25 @@ def build_reflow_pairs(flow_model, x0_batch, ode_steps):
 
     # 用 1-Rectified Flow 的 ODE 采样终点。
     # 这个 z1 不是原数据集中随机拿来的 x1，而是当前 flow 从同一个 x0 送到的终点。
+    # 因此 batch 中第 i 个 x0 和第 i 个 z1 构成新的一一对应 pair。
     z1 = ode_solve(flow_model, x0, t0=0.0, t1=1.0, steps=ode_steps)
-    return x0, z1
+    return x0, z1.detach()
 
 def reflow_loss(student_model, x0, z1):
     t = torch.rand(x0.shape[0], device=x0.device)
     t_view = t.view((x0.shape[0],) + (1,) * (x0.ndim - 1))
 
     # 2-RF 重新拟合 teacher flow 诱导出的 pair。
+    # 训练数据可以提前生成并缓存，也可以在线用 teacher ODE 生成；
+    # 无论哪种方式，student 只看新的 pairwise 直线插值。
     x_t = (1.0 - t_view) * x0 + t_view * z1
     target = z1 - x0
     return torch.mean((student_model(x_t, t) - target) ** 2)
 ```
 
-论文证明 rectification 会把任意 coupling 变成确定性 coupling，并且凸 transport cost 不增加。递归 reflow 的目标是让新 coupling 更接近“同一个起点直接到同一个终点”的 causal transport；轨迹交叉减少后，ODE 速度场更接近常向量场。
+实际二阶段训练可以有两种做法：一种是先冻结 1-RF teacher，批量采样 `X_0`，ODE solve 得到 `Z_1` 后缓存成 `(X_0,Z_1)` 数据集；另一种是训练时在线生成 `Z_1`。两者的核心都一样：第二轮不再随机从真实 dataloader 抽一个独立 `X_1` 来配对，而是使用 teacher flow 从同一个 `X_0` 送达的终点 `Z_1`。
+
+理论上，rectification 把原来的任意 coupling 换成 teacher flow 诱导的确定性 coupling，并且不会增大常见的凸搬运代价。读教程时可以先把它理解成更朴素的一句话：第一轮把“随机配对的直线监督”整理成一个可执行的 ODE 流；第二轮再把这个 ODE 流实际选择的起点-终点配对拿出来，训练一个更直接的 student。
 
 工程上这意味着同样的生成质量可能用更少 ODE 步数达到，极端情况下可以用单步 Euler：
 
@@ -804,7 +1262,7 @@ $$
 
 - Flow Matching 的核心是 **先指定概率路径，再用条件速度场训练边缘速度场**；它自然容纳 Gaussian diffusion path、CondOT path、流形/离散扩展。
 - Rectified Flow 的核心是 **给定 coupling 后沿直线回归，并通过 reflow 改善 coupling**；它最关心轨迹交叉能否减少、ODE 是否能用少步甚至一步近似。
-- CondOT CFM 和单轮 Rectified Flow 在常见噪声-数据独立耦合下有相同的代码形态，但论文问题意识不同。
+- CondOT CFM 和单轮 Rectified Flow 在常见噪声-数据独立 product coupling 下，训练 loss 和代码可以完全相同，但论文问题意识不同。
 
 ## MeanFlow
 
@@ -824,7 +1282,7 @@ Flow Matching 学的是瞬时速度 `v(z_t,t)`。MeanFlow 改学区间 `[r,t]` �
 
 $$
 u(z_t,r,t)
-=\frac{1}{t-r}\int_r^t v(z_\tau,\tau)\,d\tau,\quad r<t.
+=\frac{1}{t-r}\int_r^t v(z_\tau,\tau)\,d\tau,\quad r\lt t.
 $$
 
 平均速度直接给出区间更新：
@@ -976,10 +1434,10 @@ CondOT 条件生成训练目标为：
 $$
 \mathcal{L}_\mathrm{cond}(\theta)
 =
-\mathbb{E}_{(z,c),\epsilon,t}
+\mathbb{E}_{(X_1,c),X_0,t}
 \left[
 \left\|
-v_\theta((1-t)\epsilon+tz,t,c)-(z-\epsilon)
+v_\theta((1-t)X_0+tX_1,t,c)-(X_1-X_0)
 \right\|^2
 \right].
 $$
@@ -988,13 +1446,14 @@ $$
 
 ```python
 def conditional_flow_matching_loss(model, image, condition):
-    # image 是数据 z，condition 可以是类别 id、文本 embedding 或其他条件 token。
-    eps = torch.randn_like(image)
-    t = torch.rand(image.shape[0], device=image.device)
-    t_view = t.view((image.shape[0],) + (1,) * (image.ndim - 1))
+    # image 是数据端样本 x1；condition 可以是类别 id、文本 embedding 或其他条件 token。
+    x1 = image
+    x0 = torch.randn_like(x1)
+    t = torch.rand(x1.shape[0], device=x1.device)
+    t_view = t.view((x1.shape[0],) + (1,) * (x1.ndim - 1))
 
-    x_t = (1.0 - t_view) * eps + t_view * image
-    target = image - eps
+    x_t = (1.0 - t_view) * x0 + t_view * x1
+    target = x1 - x0
 
     pred = model(x_t, t, condition)
     return torch.mean((pred - target) ** 2)
@@ -1008,7 +1467,80 @@ def conditional_flow_matching_loss(model, image, condition):
 - 文本条件：用文本编码器得到 token embedding，通过 cross-attention 或 joint attention 注入 DiT/U-Net。
 - 图像/视频条件：把低分辨率帧、mask、首帧或参考图编码成额外 token/channel，和 noisy latent 一起送入网络。
 
-条件生成的关键边界是：条件 `c` 不参与 `x_t=(1-t)eps+tz` 的几何插值；它改变的是速度场估计，即“在这个条件下，当前 noisy state 应该往哪类数据流动”。
+AdaLN 可以理解成“让条件控制归一化后的特征尺度和偏移”。给定隐藏特征 `h` 和条件 embedding `e_c`，普通 LayerNorm 只做：
+
+$$
+\operatorname{LN}(h)=\frac{h-\mu(h)}{\sigma(h)}.
+$$
+
+AdaLN 让条件网络产生 scale 和 shift：
+
+$$
+(\gamma_c,\beta_c)=\operatorname{MLP}(e_c),
+$$
+
+再调制归一化特征：
+
+$$
+\operatorname{AdaLN}(h,c)
+=
+(1+\gamma_c)\odot \operatorname{LN}(h)+\beta_c.
+$$
+
+在 DiT 类结构里，time embedding 和 class/text embedding 常先合成一个 conditioning vector，再一次性生成 attention/MLP 两个残差分支的 scale、shift 和 gate。gate 的作用是控制这个条件残差分支写回主干的强度：
+
+$$
+h' = h + g_\mathrm{attn}(c)\odot
+\operatorname{Attn}\left(\operatorname{AdaLN}_\mathrm{attn}(h,c)\right),
+$$
+
+$$
+h'' = h' + g_\mathrm{mlp}(c)\odot
+\operatorname{MLP}\left(\operatorname{AdaLN}_\mathrm{mlp}(h',c)\right).
+$$
+
+教学版代码如下：
+
+```python
+class AdaLNDiTBlock(torch.nn.Module):
+    def __init__(self, hidden_dim, cond_dim, num_heads):
+        super().__init__()
+        self.norm1 = torch.nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.norm2 = torch.nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.attn = torch.nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True)
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(hidden_dim, 4 * hidden_dim),
+            torch.nn.GELU(),
+            torch.nn.Linear(4 * hidden_dim, hidden_dim),
+        )
+
+        # 6 组向量分别给 attention 和 MLP 分支提供 shift/scale/gate。
+        # 真实 DiT 常把最后一层初始化成 0，让模型从近似恒等映射开始训练。
+        self.cond_to_mod = torch.nn.Linear(cond_dim, 6 * hidden_dim)
+
+    def modulate(self, normalized_hidden, shift, scale):
+        # scale 用 1 + scale 是为了让 scale=0 时退化为普通 LayerNorm 输出。
+        return normalized_hidden * (1.0 + scale[:, None, :]) + shift[:, None, :]
+
+    def forward(self, hidden, cond_emb):
+        # hidden: [batch, tokens, hidden_dim]
+        # cond_emb: [batch, cond_dim]，可以由 time embedding + class/text embedding 得到。
+        shift_attn, scale_attn, gate_attn, shift_mlp, scale_mlp, gate_mlp = (
+            self.cond_to_mod(cond_emb).chunk(6, dim=-1)
+        )
+
+        attn_input = self.modulate(self.norm1(hidden), shift_attn, scale_attn)
+        attn_out, _ = self.attn(attn_input, attn_input, attn_input, need_weights=False)
+        hidden = hidden + gate_attn[:, None, :] * attn_out
+
+        mlp_input = self.modulate(self.norm2(hidden), shift_mlp, scale_mlp)
+        hidden = hidden + gate_mlp[:, None, :] * self.mlp(mlp_input)
+        return hidden
+```
+
+在条件 Flow Matching 里，AdaLN 不改变 `X_t=(1-t)X_0+tX_1` 或 target `X_1-X_0`；它只改变网络内部如何根据 `t` 和 `c` 估计速度 `v_\theta(x,t,c)`。类别条件常适合 AdaLN/FiLM，因为一个全局向量就能调制整层特征；文本条件通常还需要 cross-attention，因为每个 token 可能对不同空间位置产生不同影响。
+
+条件生成的关键边界是：条件 `c` 不参与 `X_t=(1-t)X_0+tX_1` 的几何插值；它改变的是速度场估计，即“在这个条件下，当前 noisy state 应该往哪类数据流动”。
 
 ### Classifier-Free Guidance
 
@@ -1016,15 +1548,16 @@ Classifier-Free Guidance 训练时随机丢弃条件，让同一个模型同时�
 
 ```python
 def cfg_training_loss(model, image, condition, null_condition, drop_prob=0.1):
-    eps = torch.randn_like(image)
-    t = torch.rand(image.shape[0], device=image.device)
-    t_view = t.view((image.shape[0],) + (1,) * (image.ndim - 1))
+    x1 = image
+    x0 = torch.randn_like(x1)
+    t = torch.rand(x1.shape[0], device=x1.device)
+    t_view = t.view((x1.shape[0],) + (1,) * (x1.ndim - 1))
 
-    x_t = (1.0 - t_view) * eps + t_view * image
-    target = image - eps
+    x_t = (1.0 - t_view) * x0 + t_view * x1
+    target = x1 - x0
 
     # mask=True 的样本使用空条件，迫使模型也会估计无条件速度场。
-    drop = torch.rand(image.shape[0], device=image.device) < drop_prob
+    drop = torch.rand(x1.shape[0], device=x1.device) < drop_prob
     mixed_condition = replace_condition(condition, null_condition, drop)
 
     pred = model(x_t, t, mixed_condition)
@@ -1062,18 +1595,70 @@ Flow Matching、Rectified Flow 和 MeanFlow 都可以做条件生成；差别只
 
 ### ODE 求解器
 
-Flow Matching 和 Rectified Flow 推理时都在解 ODE。常见选择：
+Flow Matching 和 Rectified Flow 推理时都在解 ODE。NFE 是 **number of function evaluations**，指一次采样中调用速度模型 `v_theta(x,t)` 的次数。它常比“步数”更能反映推理成本，因为不同 solver 每步调用模型的次数不同。
+
+常见选择：
 
 - Euler：一阶，NFE 等于步数；路径直时很好用，路径弯时误差明显。
-- Heun / midpoint：二阶，每步通常 2 NFE；少步采样时常比 Euler 稳。
+- Heun / midpoint：二阶，每步通常 2 NFE；如果步数是 `S`，总 NFE 通常是 `2S`。
 - 自适应 ODE solver：能控制误差，但在大规模图像生成中调度和吞吐未必划算。
+
+三种固定步长 solver 的区别可以直接写成代码。为了让 NFE 可见，下面显式计数每次模型调用：
+
+```python
+@torch.no_grad()
+def sample_ode_fixed_grid(model, shape, steps, method="euler", device=None):
+    if device is None:
+        device = torch.device("cpu")
+
+    # x 从源分布 p_0 采样。对 latent diffusion/flow 模型来说，shape 通常是 latent 形状。
+    x = torch.randn(shape, device=device)
+    times = torch.linspace(0.0, 1.0, steps + 1, device=device)
+    nfe = 0
+
+    for t0, t1 in zip(times[:-1], times[1:]):
+        h = t1 - t0
+        batch_t0 = t0.expand(shape[0])
+
+        if method == "euler":
+            # Euler 每步只在当前点算一次速度，所以每步 1 NFE。
+            k1 = model(x, batch_t0)
+            nfe += 1
+            x = x + h * k1
+
+        elif method == "heun":
+            # Heun 先做 Euler predictor，再在预测终点算一次速度做梯形修正。
+            # 每步调用 model 两次，所以每步 2 NFE。
+            k1 = model(x, batch_t0)
+            x_pred = x + h * k1
+            batch_t1 = t1.expand(shape[0])
+            k2 = model(x_pred, batch_t1)
+            nfe += 2
+            x = x + 0.5 * h * (k1 + k2)
+
+        elif method == "midpoint":
+            # Midpoint 也每步 2 NFE：先估计中点，再用中点速度更新整步。
+            k1 = model(x, batch_t0)
+            x_mid = x + 0.5 * h * k1
+            batch_t_mid = (t0 + 0.5 * h).expand(shape[0])
+            k_mid = model(x_mid, batch_t_mid)
+            nfe += 2
+            x = x + h * k_mid
+
+        else:
+            raise ValueError(f"unknown solver: {method}")
+
+    return x, nfe
+```
+
+如果 `steps=20`，Euler 的 NFE 是 `20`，Heun/midpoint 的 NFE 通常是 `40`。少步采样时二阶方法常更稳，但同样 NFE 预算下不一定总赢：`20` 步 Euler 和 `10` 步 Heun 都是约 `20` NFE，谁更好取决于路径弯曲程度、速度场平滑性和时间网格。
 
 ### 为什么 OT/直线路径有利于少步采样
 
 CondOT 路径的条件流是直线：
 
 $$
-\psi_t(x_0|z)=(1-t)x_0+tz.
+\psi_t(x_0|x_1)=(1-t)x_0+tx_1.
 $$
 
 如果边缘速度场也足够接近直线，Euler 的局部线性假设就更准。Flow Matching 原论文报告 OT 路径相比 diffusion path 更利于少 NFE 采样；Rectified Flow 进一步把“变直”作为训练-再训练机制；MeanFlow 则直接学习区间平均速度，绕过多步积分。
@@ -1091,50 +1676,62 @@ Flow Matching 训练的是每个时间切片上的瞬时速度回归。即使训
 
 ## 方法对照表
 
-| 主题                    | 关键公式                               | 代码里的 target                             | 推理成本                       |
-| ----------------------- | -------------------------------------- | ------------------------------------------- | ------------------------------ |
-| Standard NF             | `log p_X = log p_Z - log det J_f`      | 最大似然，不是速度回归                      | 一次可逆前向                   |
-| CNF                     | `d log p / dt = -div v`                | 最大似然或其他路径目标                      | ODE 积分                       |
-| Gaussian path           | `x_t=alpha_t z+beta_t eps`             | `alpha_dot*z+beta_dot*eps`                  | 取决于路径弯曲和 solver        |
-| Stochastic Interpolants | `I_t=alpha_t X_0+beta_t X_1+gamma_t Z` | `dot I_t`；SDE 还要 `-Z/gamma_t` 训练 score | 同一密度路径可用 ODE 或 SDE    |
-| FM / CondOT             | `x_t=(1-t)eps+tz`                      | `z - eps`                                   | 多步 ODE                       |
-| Rectified Flow          | `X_t=(1-t)X_0+tX_1`                    | `X_1-X_0`                                   | reflow 后可少步                |
-| MeanFlow                | `z_r=z_t-(t-r)u(z_t,r,t)`              | `v_t-(t-r)JVP(u_theta)`                     | 目标是一阶                     |
-| 条件生成 / CFG          | `v_cfg=v_uncond+s(v_cond-v_uncond)`    | 同主模型 target，额外输入条件               | guidance scale 影响质量/多样性 |
+| 主题                    | 关键公式                                        | 代码里的 target                                   | 推理成本                       |
+| ----------------------- | ----------------------------------------------- | ------------------------------------------------- | ------------------------------ |
+| Standard NF             | `log p_X=log p_0(z_0)-sum_k log absdet J_{f_k}` | 反向过 `K` 层并逐层累加 log-det 的最大似然        | `K` 层可逆前向                 |
+| CNF                     | `d log p / dt = -div v`                         | 当前模型轨迹上的反向 augmented ODE 得到 exact NLL | 训练/似然评估都要 ODE 积分     |
+| Gaussian path           | `X_t=alpha_t X_1+beta_t X_0`                    | `alpha_dot*X_1+beta_dot*X_0`                      | 取决于路径弯曲和 solver        |
+| Stochastic Interpolants | `I_t=alpha_t X_0+beta_t X_1+gamma_t Z`          | `dot I_t`；SDE 还要 `-Z/gamma_t` 训练 score       | 同一密度路径可用 ODE 或 SDE    |
+| FM / CondOT             | `X_t=(1-t)X_0+tX_1`                             | 预设路径给出的 `X_1-X_0`，训练不 rollout 当前模型 | 采样仍要多步 ODE               |
+| Rectified Flow          | `X_t=(1-t)X_0+tX_1`                             | `X_1-X_0`                                         | reflow 后可少步                |
+| MeanFlow                | `z_r=z_t-(t-r)u(z_t,r,t)`                       | `v_t-(t-r)JVP(u_theta)`                           | 目标是一阶                     |
+| 条件生成 / CFG          | `v_cfg=v_uncond+s(v_cond-v_uncond)`             | 同主模型 target，额外输入条件                     | guidance scale 影响质量/多样性 |
 
 ## 理解检查
 
-1. **为什么 CFM 可以替代 FM？**
+1. **NF、CNF 和 VAE 的 likelihood 差别是什么？**
 
-   因为条件速度场 `U=u_t(X_t|Z)` 的条件期望就是边缘速度场 `u_t(X_t)`。平方损失展开后，与参数有关的二次项和交叉项相同，差别只剩与 `theta` 无关的常数。
+   NF 里的 `f_theta` 应理解为 `K` 个可逆层的复合，不是一个任意单步黑盒网络。NF 直接计算并最大化 `log p_theta(x)`，做法是把数据反向过 `K` 层得到 `z_0`，再逐层累加离散 log-det；CNF 用连续散度积分得到 exact likelihood。VAE 通常不能直接计算 `log p_theta(x)`，所以最大化的是 ELBO 下界。
 
-2. **CondOT 的 target 为什么是 `z - eps`？**
+2. **CNF 训练里的 simulation 发生在哪里？**
 
-   对 `x_t=(1-t)eps+tz` 关于 `t` 求导即可得到 `z-eps`。如果把路径方差误写成 `(1-t^2)I`，这个 target 就不再对应同一条路径。
+   给定数据点 `x_1`，CNF 要从 `t=1` 反向解 augmented ODE 到 `t=0`，得到 base 端 `x_0`，同时沿这条轨迹累计散度积分 `A_0`。这个数值求解过程就是 simulation。
 
-3. **Stochastic Interpolants 和 Flow Matching 的关系是什么？**
+3. **为什么 CNF 和 Flow Matching 都写 ODE，但训练目标不同？**
+
+   CNF 的 ODE 是当前模型本身，`v_theta` 诱导的轨迹决定 `log p_theta(x)`，所以最大似然训练必须反向模拟当前模型并累计散度。Flow Matching 的训练路径在模型外部预先指定，`x_t` 和速度 target 可以直接采样出来，所以训练是速度回归，不是 exact likelihood；只有采样阶段才解学到的 ODE。
+
+4. **为什么 CFM 可以替代 FM？**
+
+   因为条件速度场 `U=u_t(X_t|X_1)` 的条件期望就是边缘速度场 `u_t(X_t)`。平方损失展开后，与参数有关的二次项和交叉项相同，差别只剩与 `theta` 无关的常数。
+
+5. **CondOT 的 target 为什么是 `X_1-X_0`？**
+
+   对 `X_t=(1-t)X_0+tX_1` 关于 `t` 求导即可得到 `X_1-X_0`。如果把路径方差误写成 `(1-t^2)I`，这个 target 就不再对应同一条路径。
+
+6. **Stochastic Interpolants 和 Flow Matching 的关系是什么？**
 
    两者都用 MSE 回归插值路径的速度；Stochastic Interpolants 允许更一般的 coupling 和额外高斯桥噪声，并且显式把 score 加进框架，从而同时覆盖 ODE flow 和 SDE diffusion。
 
-4. **Rectified Flow 和 CondOT Flow Matching 是不是同一个东西？**
+7. **Rectified Flow 和 CondOT Flow Matching 是不是同一个东西？**
 
    在独立噪声-数据耦合和线性路径下，训练 loss 形式相同；但 Rectified Flow 的核心是 coupling 和 reflow，Flow Matching 的核心是条件路径、边缘化定理和更一般的概率路径设计。
 
-5. **CondOT 为什么不等于全局 OT 已经解决？**
+8. **CondOT 为什么不等于全局 OT 已经解决？**
 
    CondOT 只是在固定数据点的条件问题中使用线性收缩路径；独立噪声-数据 pair 不一定是全局最优传输配对。真正的全局 OT path 需要源点到数据点的 OT map。
 
-6. **MeanFlow 为什么可以一阶采样？**
+9. **MeanFlow 为什么可以一阶采样？**
 
    它预测的是 `[r,t]` 区间平均速度。若 `u(z_t,r,t)` 学准了，`z_r=z_t-(t-r)u(z_t,r,t)` 本身就是积分结果，不需要把区间拆成很多瞬时速度步。
 
-7. **条件生成里的条件变量改变了什么？**
+10. **条件生成里的条件变量改变了什么？**
 
-   条件 `c` 不改变 `x_t=(1-t)eps+tz` 的插值公式；它改变速度场估计 `v_theta(x,t,c)`。CFG 则在采样时组合无条件速度和有条件速度。
+条件 `c` 不改变 `X_t=(1-t)X_0+tX_1` 的插值公式；它改变速度场估计 `v_theta(x,t,c)`。CFG 则在采样时组合无条件速度和有条件速度。
 
-8. **连续性方程在整条主线里承担什么角色？**
+11. **连续性方程在整条主线里承担什么角色？**
 
-   它把“样本沿 ODE 走”翻译成“密度随时间怎么变”。条件路径边缘化、边缘速度场生成边缘路径、CNF 的 log-density 更新，本质都在使用这个守恒关系。
+它把“样本沿 ODE 走”翻译成“密度随时间怎么变”。条件路径边缘化、边缘速度场生成边缘路径、CNF 的 log-density 更新，本质都在使用这个守恒关系。
 
 ## 来源
 

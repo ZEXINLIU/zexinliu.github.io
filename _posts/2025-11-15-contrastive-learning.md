@@ -1,32 +1,36 @@
 ---
 layout: post
-title: "Contrastive Learning: From Sampling Strategies to Multimodal Representation Learning"
+title: "Contrastive Learning: Objectives, Dictionaries, Momentum Encoders, and Multimodal Alignment"
 date: 2025-11-15 00:00:00
-description: 从 Triplet、InfoNCE、NT-Xent 到 MoCo、SimCLR、DINO、CLIP 的统一视角。
+description: 从 anchor/positive/negative、dictionary 与 temperature 出发，梳理 Triplet、NCE/InfoNCE、NT-Xent、MoCo/SimCLR、BYOL/SimSiam/DINO、CLIP 以及 ArcFace/CosFace 的候选集合与表征几何。
 tags: contrastive-learning representation-learning multimodal-learning machine-learning
 categories: ai-notes
 featured: true
 ---
 
-本文重点内容如下：
+对比学习可以按一条因果链理解：任务语义决定 view 与 positive 的构造；positive、negative 或 target 的来源决定候选集合；候选集合的规模、新鲜度和采样成本决定 memory bank、queue、large batch 或 prototype；loss 将这些设计转成梯度；encoder 更新、teacher、stop-gradient 和 centering 等机制决定训练信号是否稳定。
 
-- 对比学习的主问题不是“把相似样本拉近”这句口号，而是如何定义 anchor、positive、negative 和 dictionary。SimCLR、MoCo、CLIP 的 loss 形式很像，但正负样本和候选集合完全不同。
-- NCE、InfoNCE、NT-Xent、CLIP symmetric loss 都可以写成候选集合上的交叉熵；Triplet loss 是显式 margin ranking；MINE 是互信息估计器，不是主流视觉对比预训练的训练目标。
-- InstDisc、MoCo、SimCLR 的核心差别是字典机制：memory bank、queue、large batch 分别在负样本规模、特征一致性和显存成本之间取不同折中。
-- BYOL、SimSiam、DINO 的重点是 negative-free 如何避免坍缩：predictor、stop-gradient、momentum teacher、centering、sharpening 都是在改变优化动力学。
-- ArcFace/CosFace 不是自监督对比学习，但它们把特征和类别原型放到单位超球面上，用角度 margin 强化类内紧凑和类间分离，适合与对比学习放在同一套几何语言里理解。
-- 健康生理信号应用属于个人兴趣预研，不作为对比学习通识路线贯穿全文；第 6 节单独讨论 ECG-PPG 这类多模态信号如何借鉴 CLIP 式对比目标。
+评价一个对比学习方法，可以先问五个问题：
 
-## 0. 阅读地图
+- 语义假设：哪种关系被定义为 positive，哪些变化被要求不影响表征。SimCLR 的同图增强、CPC 的未来 latent、CLIP 的图文配对对应不同语义假设。
+- 候选集合：negative、target 或 class prototype 来自 batch、memory bank、queue、teacher 还是分类头；这一步决定计算成本、特征一致性和 false negative 风险。
+- 训练目标：Triplet、NCE、InfoNCE、NT-Xent、CLIP symmetric loss 和 margin softmax 都在刻画正候选相对其他候选的优势，但归一化范围、采样近似和监督来源不同。
+- 更新机制：momentum encoder 主要缓解 queue/memory bank key 与当前 query encoder 的特征不一致；BYOL、SimSiam、DINO 的 predictor、stop-gradient、EMA teacher、centering、sharpening 主要处理 negative-free 设定下的目标稳定和坍缩风险。
+- 几何解释：自监督对比学习、人脸识别 margin softmax 和 CLIP 式跨模态对齐都可以放到单位球面上的候选竞争框架中比较，但它们的 positive、dictionary 和监督信号不同。
 
-| 章节 | 解决的问题                               | 关键词                                                      |
-| ---- | ---------------------------------------- | ----------------------------------------------------------- |
-| 1    | 对比学习统一建模                         | anchor、positive、negative、dictionary、temperature         |
-| 2    | loss 家族如何互相连接                    | Triplet、NCE、InfoNCE、NT-Xent、MINE、CLIP loss             |
-| 3    | 代表论文如何定义输入、正负样本和训练损失 | InstDisc、CPC、CMC、MoCo、SimCLR、BYOL、SimSiam、DINO、CLIP |
-| 4    | 精度提升方式背后的机制                   | augmentation、projection head、queue、batch、backbone       |
-| 5    | 与人脸识别 loss 的连接                   | metric learning、CosFace、ArcFace、class prototype          |
-| 6    | 健康生理信号应用预研                     | ECG、PPG、HR、HRV、多模态同步                               |
+## 0. 目录与读法
+
+| 跳转                      | 本节回答的问题                           | 阅读重点                                                    |
+| ------------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| [1. 统一视角](#sec-1)     | 如何把不同算法放进同一套对象定义         | anchor、positive、negative、dictionary、temperature、动机链 |
+| [2. Loss 家族](#sec-2)    | 公式相似的 loss 如何归类和区分           | Triplet、NCE、InfoNCE、NT-Xent、MINE、CLIP loss             |
+| [3. 代表论文](#sec-3)     | 每篇论文如何定义输入、正负样本和训练目标 | InstDisc、CPC、CMC、MoCo、SimCLR、BYOL、SimSiam、DINO、CLIP |
+| [4. 工程 recipe](#sec-4)  | 涨点手段对应什么机制和风险               | augmentation、projection head、queue、batch、backbone       |
+| [5. 人脸识别连接](#sec-5) | margin softmax 如何提供监督版几何对照    | normalized softmax、SphereFace、AM-Softmax/CosFace、ArcFace |
+| [6. 理解检查](#sec-6)     | 如何确认自己读懂关键机制                 | 公式、候选集合、更新机制、几何解释                          |
+| [7. 主要出处](#sec-7)     | 公式和算法细节来自哪些论文               | 主线论文、loss 论文、人脸识别 margin softmax                |
+
+<a id="sec-1"></a>
 
 ## 1. 统一视角：对比学习是候选集合上的判别任务
 
@@ -57,11 +61,40 @@ $$
 | negative     | 其他实例、其他时间位置、其他图文对                      | 哪些因素应被区分         |
 | dictionary   | memory bank、queue、当前 batch、类别 prototype          | 候选集合规模和特征一致性 |
 
-同一个交叉熵形式，放在不同数据构造里会学到不同不变性。SimCLR 的 positive 来自同一图像的两种增强；CPC 的 positive 来自同一序列的未来 latent；CLIP 的 positive 来自同一条图文对。loss 只是最后一步，真正的建模选择藏在正负样本定义和采样策略里。
+同一个交叉熵形式，放在不同数据构造里会学到不同不变性。SimCLR 的 positive 来自同一图像的两种增强；CPC 的 positive 来自同一序列的未来 latent；CLIP 的 positive 来自同一条图文对。loss 位于链条末端，前面的正负样本定义、候选集合和采样策略决定了训练信号的含义。
+
+### 1.1 从任务定义到工程结构的动机链
+
+多数对比学习方法可以按下面的决策顺序拆解：
+
+```text
+任务希望保留什么语义
+-> 如何构造 view、anchor、positive
+-> negative 或 target 从哪里来
+-> 候选集合用 batch、memory bank、queue 还是 prototype
+-> loss 如何提高正候选相对其他候选的 logit 或相似度
+-> 编码器、projection head、teacher、stop-gradient 如何让这个目标可优化
+```
+
+这条链对应的技术问题如下：
+
+| 环节         | 核心问题                             | 常见设计                                                               | 代价或失败模式                                                     |
+| ------------ | ------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 任务与不变性 | 哪些变化应该被忽略，哪些差异必须保留 | 数据增强、跨视图配对、未来预测、图文配对、类别 prototype               | positive 定义错会学到错误不变性                                    |
+| 候选集合     | 一个 anchor 要和多少候选竞争         | in-batch negatives、memory bank、queue、全类别 prototype               | 候选少则信号弱，候选多则计算、通信或 false negative 风险上升       |
+| 字典结构     | 如何在小 batch 下得到大 dictionary   | memory bank、FIFO queue、large batch                                   | memory bank/queue 会引入 stale feature；large batch 显存和通信昂贵 |
+| 编码器更新   | 候选特征如何保持一致                 | momentum encoder、EMA teacher、stop-gradient                           | 更新太慢目标滞后，更新太快目标抖动                                 |
+| 训练目标     | 如何把正候选的相对优势写成可优化目标 | NCE、InfoNCE、NT-Xent、symmetric CE、margin softmax、cosine regression | softmax 依赖负样本质量；negative-free 需要额外防坍缩结构           |
+
+需要区分两类失败模式：momentum encoder 主要缓解 queue/memory bank 中 key 表征与当前 query encoder 的不一致；BYOL、SimSiam、DINO 在 negative-free 设定下用 predictor、stop-gradient、EMA teacher、centering 或 sharpening 维持目标稳定并降低坍缩风险。二者都服务于训练信号稳定性，但对应的问题不同。
+
+<a id="sec-2"></a>
 
 ## 2. Loss 家族：从 margin 到 softmax，再到互信息
 
 ### 2.1 Triplet loss
+
+要点：Triplet loss 用 margin 约束 positive 与 negative 的相对距离。
 
 Triplet loss 来自 metric learning，在 FaceNet 中用于学习人脸嵌入：
 
@@ -76,6 +109,8 @@ $$
 
 ### 2.2 Softmax contrastive loss
 
+要点：Softmax contrastive loss 是以 anchor 为 query、以候选集合为类别空间的交叉熵。
+
 如果 anchor `i` 的正样本是 `j`，候选集合为 `A(i)`，最常见的对比目标是：
 
 $$
@@ -86,7 +121,9 @@ $$
 {\sum_{a\in A(i)} \exp(s(i,a)/\tau)}.
 $$
 
-这就是交叉熵：模型要在候选集合里把 `j` 分类为正确答案。这里的类别不是人工语义类，而是“这个 anchor 应该匹配哪个 key”。
+这个目标等价于交叉熵：模型在候选集合中将 `j` 作为正确类别。这里的类别指“这个 anchor 应该匹配哪个 key”，不对应人工语义类。
+
+下面把 anchor 表征的梯度完整推一遍。为避免把 query 角色和 key 角色混在一起，先采用最常见的矩阵实现视角：当前行的 query 是 `z_i`，候选集合里的 key 是 `{z_a}`，且求这一行 loss 对 query 表征的梯度时，把 key 表征看成另一个分支输出。SimCLR/CLIP 的对称 loss 会让同一个样本在别的行里再作为 key 承担梯度，这部分稍后单独说明。
 
 令
 
@@ -102,7 +139,59 @@ $$
 s(i,a)=z_i^\top z_a,
 $$
 
-anchor 表征的梯度为：
+则 loss 可以展开成：
+
+$$
+\mathcal{L}_i
+=
+-\frac{1}{\tau}z_i^\top z_j
++
+\log
+\sum_{a\in A(i)}
+\exp\left(\frac{z_i^\top z_a}{\tau}\right).
+$$
+
+第一项的梯度是：
+
+$$
+\frac{\partial}{\partial z_i}
+\left(
+-\frac{1}{\tau}z_i^\top z_j
+\right)
+=
+-\frac{1}{\tau}z_j.
+$$
+
+第二项令
+
+$$
+Z_i
+=
+\sum_{a\in A(i)}
+\exp\left(\frac{z_i^\top z_a}{\tau}\right),
+$$
+
+则
+
+$$
+\begin{aligned}
+\frac{\partial}{\partial z_i}\log Z_i
+&=
+\frac{1}{Z_i}
+\frac{\partial Z_i}{\partial z_i}\\
+&=
+\frac{1}{Z_i}
+\sum_{a\in A(i)}
+\exp\left(\frac{z_i^\top z_a}{\tau}\right)
+\frac{1}{\tau}z_a\\
+&=
+\frac{1}{\tau}
+\sum_{a\in A(i)}
+p_{ia}z_a.
+\end{aligned}
+$$
+
+两项相加，得到 query-role 下 anchor 表征的梯度：
 
 $$
 \frac{\partial \mathcal{L}_i}{\partial z_i}
@@ -113,11 +202,114 @@ $$
 \right).
 $$
 
-梯度下降会把 anchor 拉向正样本 `z_j`，并按 softmax 概率把它推离候选集合中的其他 key。负样本越像正样本，softmax 概率越高，梯度贡献越大；这就是 hard negative 自动加权的来源。
+梯度下降更新是 `z_i <- z_i - eta * gradient`，所以 `-z_j` 这一项会把 anchor 拉向正样本；`\sum_a p_{ia}z_a` 这一项会把 anchor 从 softmax 概率加权的候选均值处推开。越像 anchor 的 negative 会得到更大的 `p_{ia}`，因此贡献更大的排斥梯度，这就是 hard negative 自动加权的来源。
+
+如果看某个 key `z_a` 在这一行里的梯度，则有：
+
+$$
+\frac{\partial \mathcal{L}_i}{\partial z_a}
+=
+\frac{1}{\tau}
+\left(p_{ia}-\mathbf{1}_{a=j}\right)z_i.
+$$
+
+这说明 positive key 的系数是 `p_ij - 1 < 0`，梯度下降会把它拉向 query；negative key 的系数是 `p_ia > 0`，梯度下降会把它推离 query。对称 loss 中，同一个样本既在自己的行里做 query，也在其他样本的行里做 key，总梯度就是这些角色贡献的和。
+
+如果候选集合显式包含 `a=i`，也就是自己作为 key 参与分母，那么 `z_i` 还会通过 self-key 的位置额外进入 `s(i,i)=z_i^\top z_i`。此时 query-role 梯度之外还要加上 self-key 梯度：
+
+$$
+\frac{\partial \mathcal{L}_i}{\partial z_i}
+=
+\frac{1}{\tau}
+\left(
+\sum_{a\in A(i)}p_{ia}z_a-z_j
+\right)
++
+\frac{1}{\tau}
+\left(p_{ii}-\mathbf{1}_{i=j}\right)z_i.
+$$
+
+SimCLR 的 NT-Xent 分母用 `k != i` 的 mask 排除了 self-key，因此不会出现这一项。许多实现还会先做 L2 normalize，令 `z_i = u_i / ||u_i||`。这时上面的梯度是对 normalized embedding 的梯度，传回未归一化向量 `u_i` 时还要乘 normalize 的 Jacobian：
+
+$$
+\frac{\partial \mathcal{L}_i}{\partial u_i}
+=
+\frac{1}{\|u_i\|}
+\left(I-z_i z_i^\top\right)
+\frac{\partial \mathcal{L}_i}{\partial z_i}.
+$$
+
+这一步会把梯度投影到单位球的切空间，所以 normalized contrastive learning 更强调角度相似度，而不是简单增大向量范数。
 
 ### 2.3 NCE 与 InfoNCE
 
-Noise-Contrastive Estimation 最初用于未归一化统计模型的估计。它把“来自真实数据”与“来自噪声分布”写成二分类问题。设模型给出的未归一化概率为 `p_m(i|v)`，噪声分布为 `p_n(i)`，每个正样本配 `m` 个噪声样本，则一个候选来自真实分布的后验为：
+要点：NCE 用 data-vs-noise 二分类近似未归一化模型估计；InfoNCE 将候选集合分类和互信息下界联系起来。
+
+Noise-Contrastive Estimation 最初用于未归一化统计模型的估计。所谓未归一化统计模型，是指模型容易给出一个能量或打分函数，却很难计算全空间归一化常数。例如：
+
+$$
+\tilde p_\theta(x)=\exp(f_\theta(x)),
+\qquad
+p_\theta(x)
+=
+\frac{\tilde p_\theta(x)}{Z_\theta},
+\qquad
+Z_\theta=\int \tilde p_\theta(x)dx.
+$$
+
+最大似然需要：
+
+$$
+\log p_\theta(x)
+=
+f_\theta(x)-\log Z_\theta.
+$$
+
+难点在 `Z_theta`。离散大词表、全训练集实例分类或连续空间能量模型里，`Z_theta` 可能意味着遍历巨大类别空间或做高维积分。它的梯度也不好算：
+
+$$
+\nabla_\theta \log Z_\theta
+=
+\mathbb{E}_{x\sim p_\theta}
+\left[\nabla_\theta f_\theta(x)\right],
+$$
+
+这要求从当前模型分布采样或枚举全空间。NCE 的动机就是绕开这个 full normalization：不直接问“这个样本在全空间的归一化概率是多少”，而是问“这个样本更像真实数据，还是更像一个已知噪声分布生成的样本”。
+
+NCE 构造一个二分类混合数据集：每个真实样本配 `m` 个噪声样本。令 `D=1` 表示样本来自真实数据，`D=0` 表示样本来自噪声。先验为：
+
+$$
+P(D=1)=\frac{1}{m+1},
+\qquad
+P(D=0)=\frac{m}{m+1}.
+$$
+
+条件密度为：
+
+$$
+p(x|D=1)=p_\theta(x),
+\qquad
+p(x|D=0)=p_n(x),
+$$
+
+其中 `p_n` 是已知噪声分布。由 Bayes 公式：
+
+$$
+\begin{aligned}
+P(D=1|x)
+&=
+\frac{p(x|D=1)P(D=1)}
+{p(x|D=1)P(D=1)+p(x|D=0)P(D=0)}\\
+&=
+\frac{p_\theta(x)\frac{1}{m+1}}
+{p_\theta(x)\frac{1}{m+1}+p_n(x)\frac{m}{m+1}}\\
+&=
+\frac{p_\theta(x)}
+{p_\theta(x)+m p_n(x)}.
+\end{aligned}
+$$
+
+这就是“真实分布的后验公式”的来源。InstDisc 论文里把样本写成实例 id `i` 和当前表征 `v`，于是对应为：
 
 $$
 P(D=1|i,v)
@@ -126,7 +318,7 @@ P(D=1|i,v)
 {p_m(i|v)+m p_n(i)}.
 $$
 
-NCE 损失为：
+NCE 损失就是这个二分类问题的 logistic loss：
 
 $$
 \mathcal{L}_{NCE}
@@ -135,9 +327,48 @@ $$
 -m\mathbb{E}_{p_n}\log \left(1-P(D=1|i,v)\right).
 $$
 
-在 InstDisc 中，NCE 用来近似全训练集实例分类的巨大分母。严格说，NCE 与 full softmax 不是逐样本梯度完全相同；在噪声样本充分、模型族合适、归一化项处理正确时，NCE 的期望目标可以一致估计原始归一化模型。对比学习实现里更常把它理解为“大规模 softmax 的采样近似”。
+NCE 为什么能被说成大规模 softmax 的采样近似？先看 full softmax。如果每个实例都是一个类别，正确类别为 `i`，logit 为 `s_a`：
 
-InfoNCE 更常见于现代对比学习。给定一个正样本和 `N-1` 个负样本：
+$$
+\mathcal{L}_{full}
+=
+-\log
+\frac{\exp(s_i)}
+{\sum_{a=1}^{M}\exp(s_a)}.
+$$
+
+它对每个 logit 的梯度是：
+
+$$
+\frac{\partial \mathcal{L}_{full}}{\partial s_a}
+=
+p_a-\mathbf{1}_{a=i},
+\qquad
+p_a=
+\frac{\exp(s_a)}{\sum_b\exp(s_b)}.
+$$
+
+这要求知道所有 `M` 个类别的归一化概率 `p_a`。NCE 只采样一个 positive 和 `m` 个 noise negative。对采样到的候选 `a`，可以写二分类 logit：
+
+$$
+h_a
+=
+\log p_m(a|v)-\log\left(m p_n(a)\right).
+$$
+
+binary logistic 的梯度形态是：
+
+$$
+\frac{\partial \mathcal{L}_{NCE}}{\partial h_a}
+=
+\sigma(h_a)-y_a,
+$$
+
+其中 `y_a=1` 表示 data sample，`y_a=0` 表示 noise sample。它和 full softmax 的 `p_a - one_hot` 很像，但不是逐样本相同：full softmax 的 `p_a` 来自全类别归一化；NCE 的 `sigma(h_a)` 来自“data vs noise”的局部二分类后验。只有在噪声样本充分、噪声分布覆盖合理、模型归一化项处理正确时，NCE 的期望目标才会逼近原始归一化模型估计。工程上说它是大规模 softmax 的采样近似，强调的是它用少量 noise negative 替代了全分母枚举，而不是说每一步梯度完全等价。
+
+InfoNCE 的动机和 NCE 有亲缘关系，但目标发生了变化。NCE 关心估计一个概率模型 `p_theta(x)`，所以它显式使用噪声分布 `p_n`，并做 data-vs-noise 二分类。InfoNCE 更关心表示学习：给定上下文 `c`，从一个 positive 和 `N-1` 个 negative 组成的候选集合中找出哪个 `x` 来自条件分布 `p(x|c)`。
+
+InfoNCE 的常见写法是：
 
 $$
 \mathcal{L}_N
@@ -148,21 +379,60 @@ $$
 {f(x^+,c)+\sum_{r=1}^{N-1} f(x_r^-,c)}.
 $$
 
-如果最优 critic 满足密度比形式：
+也可以把候选集合写成 `X={x_1,...,x_N}`，其中一个 index `d` 是 positive。构造过程是：先均匀采样 `d`，再从 `p(x|c)` 采样 `x_d`，其余 `x_l` 从边缘分布 `p(x)` 采样。于是：
+
+$$
+p(X|d=i,c)
+=
+p(x_i|c)\prod_{l\ne i}p(x_l).
+$$
+
+由 Bayes 公式，并且 `P(d=i)=1/N`：
+
+$$
+\begin{aligned}
+P(d=i|X,c)
+&=
+\frac{p(X|d=i,c)}
+{\sum_{j=1}^{N}p(X|d=j,c)}\\
+&=
+\frac{p(x_i|c)\prod_{l\ne i}p(x_l)}
+{\sum_{j=1}^{N}p(x_j|c)\prod_{l\ne j}p(x_l)}\\
+&=
+\frac{\frac{p(x_i|c)}{p(x_i)}}
+{\sum_{j=1}^{N}\frac{p(x_j|c)}{p(x_j)}}.
+\end{aligned}
+$$
+
+所以最优 critic 应该学习条件分布与边缘分布的密度比：
 
 $$
 f^*(x,c)\propto \frac{p(x|c)}{p(x)},
 $$
 
-则有互信息下界：
+这就是 InfoNCE 和互信息连接起来的核心原因，因为互信息本身就是这个密度比的对数期望：
+
+$$
+I(x;c)
+=
+\mathbb{E}_{p(x,c)}
+\log
+\frac{p(x|c)}{p(x)}.
+$$
+
+在这个构造下，InfoNCE 有互信息下界：
 
 $$
 I(x;c)\ge \log N-\mathcal{L}_N.
 $$
 
-这条式子说明候选集合越大，理论上可表达的互信息下界越高；但负样本数不是越大越无条件好，false negative、batch 构成和优化难度都会改变实际效果。
+直观证明可以这样理解：positive index `d` 在 `N` 个位置上均匀分布，所以先验熵是 `H(d)=log N`。模型用 `X,c` 去预测 `d`，交叉熵越小，说明候选集合越能揭示 `x` 和 `c` 的依赖。最优分类器的交叉熵对应 `H(d|X,c)`，因此 `log N - L_N` 可以看作从候选集合中识别 positive 得到的信息量；这个信息量不会超过真实变量间的互信息，所以形成下界。
+
+从 NCE 到 InfoNCE，优化目标从“估计未归一化概率模型”转成“学习能区分 positive 的表示”。它弱化了显式噪声分布建模和归一化常数估计，把问题整理成一个稳定的 softmax cross entropy；代价是这个下界依赖候选集合大小与采样方式。候选集合越大，理论上可表达的互信息下界越高；但 false negative、batch 构成和优化难度都会改变实际效果。
 
 ### 2.4 NT-Xent
+
+要点：NT-Xent 是 SimCLR 批内两视图采样设定下的 InfoNCE/softmax contrastive loss。
 
 SimCLR 的 NT-Xent 是 normalized temperature-scaled cross entropy。对 batch 中 `N` 张图片各做两种增强，得到 `2N` 个 view。对 view `i`，其正样本 `j` 是同一原图的另一种增强，其余 `2N-2` 个 view 是负样本：
 
@@ -183,9 +453,11 @@ $$
 \left(\ell_{2k-1,2k}+\ell_{2k,2k-1}\right).
 $$
 
-NT-Xent 可以看成 InfoNCE 在 SimCLR 批内采样方式下的名字。
+这句话里的重点有三层：normalized 指 embedding 做 L2 normalize；temperature-scaled 指相似度除以 `tau`；cross entropy 指每一行都在 `2N-1` 个候选中把同图另一 view 分类出来。它和一般 InfoNCE 的差别不在数学大类，而在 SimCLR 如何构造 batch、positive 和 mask。
 
 ### 2.5 MINE
+
+要点：MINE 直接用 variational bound 估计互信息，不使用候选集合分类目标。
 
 互信息可以写成 KL 散度：
 
@@ -206,21 +478,24 @@ I(X;Y)
 \mathbb{E}_{P_XP_Y}\left[e^{T_\theta(x,y)}\right].
 $$
 
-它不是候选集合分类，而是直接估计互信息下界。MINE 更适合作为分析变量依赖或信息瓶颈的工具；在视觉自监督主线中，InfoNCE/NT-Xent 更常见，因为它们的 batch 训练更稳定。
+MINE 直接估计互信息下界，不使用候选集合分类目标。它更适合作为分析变量依赖或信息瓶颈的工具；在视觉自监督主线中，InfoNCE/NT-Xent 更常见，因为它们的 batch 训练更稳定。
 
 ### 2.6 Loss 关系速查
 
-| Loss              | 正样本                            | 负样本                | 形式                     | 典型方法                 |
-| ----------------- | --------------------------------- | --------------------- | ------------------------ | ------------------------ |
-| Triplet           | 同身份/同语义样本                 | 不同身份/不同语义样本 | hinge ranking            | FaceNet、metric learning |
-| NCE               | 真实样本                          | 噪声分布样本          | 二分类 logistic          | InstDisc 的大规模近似    |
-| InfoNCE           | 一个正 key                        | 候选集合其他 key      | softmax CE               | CPC、MoCo、CMC           |
-| NT-Xent           | 同图另一增强                      | batch 内其他 view     | symmetric softmax CE     | SimCLR                   |
-| BYOL/SimSiam loss | 另一 view 的 stop-gradient target | 无显式负样本          | cosine regression        | BYOL、SimSiam            |
-| DINO loss         | teacher 输出分布                  | 无显式负样本          | teacher-student CE       | DINO                     |
-| CLIP loss         | 配对图文                          | batch 内其他图文      | bidirectional softmax CE | CLIP                     |
-| MINE              | 联合分布样本                      | 边缘乘积分布样本      | DV lower bound           | MI 估计                  |
-| ArcFace/CosFace   | 正确类别 prototype                | 其他类别 prototype    | margin softmax CE        | 人脸识别                 |
+| Loss                | 核心定位                                                | 正样本/目标         | 负样本/对照           | 形式                     | 典型方法                                |
+| ------------------- | ------------------------------------------------------- | ------------------- | --------------------- | ------------------------ | --------------------------------------- |
+| Triplet             | 用 margin 规定“positive 必须比 negative 更近”           | 同身份/同语义样本   | 不同身份/不同语义样本 | hinge ranking            | FaceNet、metric learning                |
+| Softmax contrastive | 在候选集合里把 positive 分类出来                        | 一个正 key          | 候选集合其他 key      | softmax CE               | 对比学习通用骨架                        |
+| NCE                 | 把全空间归一化改成 data-vs-noise 二分类                 | 真实样本            | 噪声分布样本          | binary logistic          | InstDisc 的大规模近似                   |
+| InfoNCE             | 在 `N` 个候选中找 positive，并学习密度比                | 条件分布样本        | 边缘分布样本          | softmax CE + MI bound    | CPC、MoCo、CMC                          |
+| NT-Xent             | InfoNCE 在 SimCLR 批内两视图采样下的名字                | 同图另一增强        | batch 内其他 view     | symmetric softmax CE     | SimCLR                                  |
+| BYOL/SimSiam loss   | 不做 negative 分类，而是预测 stop-gradient target       | 另一 view 的 target | 无显式负样本          | cosine regression        | BYOL、SimSiam                           |
+| DINO loss           | student 预测 momentum teacher 的分布                    | teacher 输出分布    | 无显式负样本          | teacher-student CE       | DINO                                    |
+| CLIP loss           | 双向 InfoNCE：图找文、文找图                            | 配对图文            | batch 内其他图文      | bidirectional softmax CE | CLIP                                    |
+| MINE                | 直接估计互信息的 variational lower bound                | 联合分布样本        | 边缘乘积分布样本      | DV lower bound           | MI 估计                                 |
+| Margin softmax      | 监督分类中只惩罚正确类别 logit，让它必须赢出一个 margin | 正确类别 prototype  | 其他类别 prototype    | margin softmax CE        | SphereFace、AM-Softmax/CosFace、ArcFace |
+
+<a id="sec-3"></a>
 
 ## 3. 代表论文：输入构造、正负样本、loss 与代码
 
@@ -254,7 +529,7 @@ $$
 
 训练目标是让图片被识别为自身实例。由于分母要扫全数据集，论文使用 NCE 近似。
 
-**Loss 归类与等价视角。** 上面的 non-parametric softmax 是“实例作为类别”的多分类 cross entropy：第 `i` 张图的 positive class 就是它自己的实例 id，其他实例都是 negative class。InstDisc 真正的工程难点是类别数等于数据集大小，full softmax 分母太大，所以论文用 NCE 把多分类归一化问题改写成 data-vs-noise 的二分类 logistic 目标。它不是另一个完全无关的 loss，而是对巨大实例 softmax 的采样估计路径；memory bank 改变的是 dictionary 的存储与采样方式，不改变“同实例为正、其他实例为负”的判别本质。
+**Loss 归类与等价视角。** 上面的 non-parametric softmax 是“实例作为类别”的多分类 cross entropy：第 `i` 张图的 positive class 是它自己的实例 id，其他实例是 negative class。InstDisc 的工程约束来自类别数等于数据集大小，full softmax 分母需要遍历全训练集；NCE 将这个多分类归一化问题改写成 data-vs-noise 的二分类 logistic 估计。memory bank 改变 dictionary 的存储与采样方式，判别目标仍是“同实例为正、其他实例为负”。
 
 | 项目       | InstDisc 中的定义                       |
 | ---------- | --------------------------------------- |
@@ -322,7 +597,7 @@ $$
 {\sum_{\tilde z\in \mathcal{N}_{t,k}}\exp(\tilde z^\top W_k c_t)}.
 $$
 
-**Loss 归类与等价视角。** 这是标准 InfoNCE：`c_t` 是 query，真实未来 latent `z_{t+k}` 是 positive，候选集合中的其他 latent 是 negative。分母不是为了做生成式重建，而是在候选集合中做 softmax 分类；当 critic 近似密度比时，最小化这个 cross entropy 等价于最大化互信息下界 `log N - L_N`。CPC 的特别之处在于 positive 来自“未来预测”，而不是同图增强或跨模态配对。
+**Loss 归类与等价视角。** 这是标准 InfoNCE：`c_t` 是 query，真实未来 latent `z_{t+k}` 是 positive，候选集合中的其他 latent 是 negative。分母用于候选集合 softmax 分类，不用于生成式重建；当 critic 近似密度比时，最小化这个 cross entropy 等价于最大化互信息下界 `log N - L_N`。CPC 的 positive 来自未来预测，而不是同图增强或跨模态配对。
 
 代码化实现：
 
@@ -348,7 +623,7 @@ def cpc_step(sequence, encoder, autoregressive, W, tau):
     return mean(losses)
 ```
 
-CPC 的关键不是“用了 RNN”，而是把预测未来改造成候选集合分类，并用 InfoNCE 连接互信息下界。
+CPC 将未来预测写成候选集合分类，并通过 InfoNCE 连接互信息下界。
 
 ### 3.4 CMC：跨视图 InfoNCE
 
@@ -397,7 +672,7 @@ CMC 的思想后来在 CLIP 中变得更清楚：只要两个模态或视图存�
 
 ### 3.5 InvaSpread：增强不变性与实例分散
 
-InvaSpread 强调两件事：同一实例的增强 view 应该 invariant，不同实例的 embedding 应该 spreading。它和 SimCLR 的精神非常接近，只是 SimCLR 后来用更系统的 augmentation、projection head 和大 batch recipe 把效果推高。
+InvaSpread 强调两件事：同一实例的增强 view 应该 invariant，不同实例的 embedding 应该 spreading。它的目标接近 SimCLR；SimCLR 后来用更系统的 augmentation、projection head 和大 batch recipe 提升效果。
 
 | 项目       | InvaSpread 中的定义                     |
 | ---------- | --------------------------------------- |
@@ -419,7 +694,7 @@ $$
 {\sum_j \exp(z_i^\top z_j^+/\tau)}.
 $$
 
-**Loss 归类与等价视角。** 这个目标属于 instance discrimination softmax，也可以看成同实例增强构造下的 InfoNCE。`z_i^+` 是同一实例的增强 positive，其他 `z_j^+` 是 spreading 所需的 negative。它的“装饰”是强调 invariant + spreading 的解释语言；数学上仍是候选集合交叉熵。
+**Loss 归类与等价视角。** 这个目标属于 instance discrimination softmax，也可以看成同实例增强构造下的 InfoNCE。`z_i^+` 是同一实例的增强 positive，其他 `z_j^+` 是 spreading 所需的 negative。invariant + spreading 是对目标效果的描述，数学形式仍是候选集合交叉熵。
 
 代码化实现可以写成单向版本：
 
@@ -506,7 +781,7 @@ $$
 {\sum_{k=1}^{2N}\mathbf{1}_{k\ne i}\exp(\operatorname{sim}(z_i,z_k)/\tau)}.
 $$
 
-**Loss 归类与等价视角。** NT-Xent 是 SimCLR 对 InfoNCE 的命名版本：normalized 表示特征先做 L2 normalize，temperature-scaled 表示 logits 除以 `tau`，cross entropy 表示在 `2N-1` 个候选里分类 positive。它的“对称”来自每个正样本对会被用两次：`i -> j` 和 `j -> i`。矩阵实现里的 mask 只是排除自己和自己匹配，不是改变 loss 类别。
+**Loss 归类与等价视角。** NT-Xent 是 SimCLR 对 InfoNCE 的命名版本：normalized 表示特征先做 L2 normalize，temperature-scaled 表示 logits 除以 `tau`，cross entropy 表示在 `2N-1` 个候选里分类 positive。对称性来自每个正样本对会被用两次：`i -> j` 和 `j -> i`。矩阵实现里的 mask 用于排除 self-match，不改变 loss 类别。
 
 SimCLR Algorithm 1 的教学化写法：
 
@@ -633,7 +908,7 @@ def simsiam_step(x1, x2, encoder, projector, predictor):
     return 0.5 * (loss_12 + loss_21)
 ```
 
-SimSiam 的核心实验信息是：stop-gradient 与 predictor 是避免坍缩的关键组件；没有显式负样本不意味着没有约束，只是约束从“排斥负样本”转成了“不对称优化结构”。
+SimSiam 的核心实验信息是：stop-gradient 与 predictor 是避免坍缩的关键组件；没有显式负样本时，约束从“排斥负样本”转成“不对称优化结构”。
 
 ### 3.10 DINO：teacher-student self-distillation
 
@@ -699,22 +974,25 @@ def dino_step(crops, student, teacher, center, tau_s, tau_t, m):
     return mean(losses), center
 ```
 
-DINO 不是用负样本做排斥，而是用 teacher 分布提供目标；centering 防止某些维度长期占优，sharpening 防止 teacher 输出过于均匀。
+DINO 用 teacher 分布提供训练目标；centering 降低少数维度长期占优的风险，sharpening 降低 teacher 输出过于均匀的风险。
 
-### 3.11 CLIP：图文双塔的矩阵对角线分类
+### 3.11 CLIP：图文双塔、双向对比训练与 zero-shot 分类
 
-CLIP 的训练 batch 有 `N` 对图文。图像 encoder 和文本 encoder 分别输出 embedding，投影并 L2 normalize 后得到 `N x N` 相似度矩阵。矩阵对角线是配对图文 positive；非对角线是 batch 内 negative。
+CLIP 的历史定位需要拆开看。图文多模态和视觉-语义 embedding 在 CLIP 之前已经存在，例如 DeViSE 用文本语义信息支持未见类别预测，Visual N-Grams 从 web 图文数据学习视觉短语。CLIP 论文报告使用 4 亿互联网图文对训练，将大规模自然语言监督、双塔对比训练和 prompt 化 zero-shot 推理组织成一个统一流程。
 
-| 项目       | CLIP 中的定义                    |
-| ---------- | -------------------------------- |
-| 输入       | `N` 对图像-文本                  |
-| anchor     | 图像 embedding 或文本 embedding  |
-| positive   | 同一 pair 的另一模态 embedding   |
-| negative   | batch 内其他图文                 |
-| dictionary | 当前 batch 的另一模态 embeddings |
-| loss       | 图到文、文到图双向 cross entropy |
+训练阶段，batch 中有 `N` 对图文。图像 encoder 和文本 encoder 分别输出 embedding，投影并 L2 normalize 后得到 `N x N` 相似度矩阵。矩阵对角线是配对图文 positive；非对角线是 batch 内 negative。
 
-公式：
+| 项目           | CLIP 中的定义                                 |
+| -------------- | --------------------------------------------- |
+| 输入           | `N` 对图像-文本                               |
+| anchor         | 图像 embedding 或文本 embedding               |
+| positive       | 同一 pair 的另一模态 embedding                |
+| negative       | batch 内其他图文                              |
+| dictionary     | 当前 batch 的另一模态 embeddings              |
+| loss           | 图到文、文到图双向 cross entropy              |
+| zero-shot 推理 | 用类别 prompt 的文本 embedding 作为分类器权重 |
+
+训练相似度矩阵：
 
 $$
 S_{ij}=z_i^{image\top}z_j^{text}\cdot \exp(t).
@@ -755,7 +1033,7 @@ $$
 \right).
 $$
 
-**Loss 归类与等价视角。** CLIP 是双向 InfoNCE / symmetric cross entropy。图到文方向把每张图当 query，在 `N` 段文本中分类出配对文本；文到图方向反过来。相似度矩阵的对角线是 positive，非对角线是 batch 内 negative。和 SimCLR 的差别不是 loss 大类，而是 positive 的来源从“同图增强”变成“图文配对”，因此它学的是跨模态语义对齐。
+**Loss 归类与等价视角。** CLIP 是双向 InfoNCE / symmetric cross entropy。图到文方向把每张图当 query，在 `N` 段文本中分类出配对文本；文到图方向反过来。相似度矩阵的对角线是 positive，非对角线是 batch 内 negative。与 SimCLR 相比，主要差异是 positive 从“同图增强”变成“图文配对”，因此训练信号对应跨模态语义对齐。
 
 论文伪代码的等价 NumPy 风格写法：
 
@@ -778,7 +1056,55 @@ def clip_step(images, texts, image_encoder, text_encoder, W_i, W_t, logit_scale)
     return 0.5 * (loss_i + loss_t)
 ```
 
-这段代码里的 `loss_i` 和 `loss_t` 正好对应上面的两个方向；转置相似度矩阵不是换了另一种 loss，而是把检索方向从 image-to-text 换成 text-to-image。
+这段代码里的 `loss_i` 和 `loss_t` 对应两个检索方向；转置相似度矩阵只改变 query/key 方向，不改变 loss 类型。
+
+CLIP 的 zero-shot 分类发生在推理阶段。给定下游类别名集合 `C`，先把类别名写进自然语言模板，例如 `"a photo of a {label}"`。每个类别的多个 prompt 经过文本 encoder 后做平均和归一化：
+
+$$
+\bar z_c^{text}
+=
+\operatorname{normalize}
+\left(
+\frac{1}{K}
+\sum_{k=1}^{K}
+\operatorname{normalize}
+\left(f_{text}(T_k(c))\right)
+\right).
+$$
+
+图像经过图像 encoder 得到 `z_x^{image}`，类别概率由图像 embedding 与各类别文本 embedding 的相似度给出：
+
+$$
+p(y=c|x)
+=
+\operatorname{softmax}_{c\in C}
+\left(
+\exp(t)\,
+z_x^{image\top}\bar z_c^{text}
+\right).
+$$
+
+这相当于用文本 encoder 生成一个数据集相关的线性分类头；下游数据集只需要类别名和 prompt，不需要在该数据集上重新训练分类器。
+
+```python
+def clip_zero_shot_predict(image, class_names, templates, image_encoder, text_encoder, logit_scale):
+    image_embed = l2_normalize(image_encoder(image[None]), axis=1)  # [1, D]
+
+    class_embeds = []
+    for name in class_names:
+        prompts = [template.format(name) for template in templates]
+        text_embed = l2_normalize(text_encoder(prompts), axis=1)    # [K, D]
+        class_embed = l2_normalize(mean(text_embed, axis=0), axis=0)
+        class_embeds.append(class_embed)
+
+    class_embeds = stack(class_embeds, axis=0)                      # [C, D]
+    logits = exp(logit_scale) * (image_embed @ class_embeds.T)       # [1, C]
+    return softmax(logits, axis=1)
+```
+
+zero-shot 能成立的条件来自训练任务本身：图像 encoder 学习把图像投到语言描述附近，文本 encoder 学习把自然语言短语投到同一空间。类别名 prompt 将新的分类任务转成图文匹配任务。它的限制也来自同一处：类别名是否能被 prompt 准确表达、训练图文分布是否覆盖该概念、相似类别之间的文本提示是否足够区分，都会影响 zero-shot 结果。
+
+<a id="sec-4"></a>
 
 ## 4. 精度提升方式：涨点背后的机制
 
@@ -795,11 +1121,17 @@ def clip_step(images, texts, image_encoder, text_encoder, W_i, W_t, logit_scale)
 | centering/sharpening | 控制输出分布，避免单维占优或全均匀                       | 超参敏感，常和 teacher-student 配套     |
 | 线性评估/迁移评估    | 区分预训练表征和端到端分类器                             | 评估协议不同会导致论文间误读            |
 
-数据增强不是装饰，而是 positive 的定义器。SimCLR 的 crop/color distortion 让模型忽略低级变化；MoCo v2 通过增强和 MLP head 吸收 SimCLR recipe；DINO 的 multi-crop 让局部视图对齐全局语义。判断一个增强是否合理，关键看它是否保留任务希望迁移的因素。
+数据增强直接参与 positive 定义。SimCLR 的 crop/color distortion 让模型忽略低级变化；MoCo v2 通过增强和 MLP head 吸收 SimCLR recipe；DINO 的 multi-crop 让局部视图对齐全局语义。增强是否合适，取决于它是否保留目标任务需要迁移的因素。
 
-## 5. 和人脸识别的连接：ArcFace/CosFace 是监督版角度对比
+<a id="sec-5"></a>
 
-人脸识别的目标是让同一身份类内紧、不同身份类间远。普通 softmax 的 logit 同时受角度和特征范数影响；CosFace 和 ArcFace 把特征和类别权重都 L2 normalize：
+## 5. 和人脸识别的连接：margin softmax 是有标签的原型竞争
+
+人脸识别训练通常把身份当作分类标签，但最终要用 embedding 做 verification 或 retrieval。训练目标同时要求同一身份的特征聚合、不同身份的特征在角度上分离。FaceNet 用 triplet loss 直接约束样本对/三元组；SphereFace、CosFace、ArcFace 将这类约束放进 softmax 分类框架，让每个类别权重向量成为一个 class prototype。
+
+### 5.1 Normalized softmax：prototype 版候选集合
+
+先把特征和类别权重都放到单位球面上：
 
 $$
 \|x\|_2=1,\qquad
@@ -807,132 +1139,113 @@ $$
 W_j^\top x=\cos\theta_j.
 $$
 
-CosFace 在正确类别的 cosine 上减去 margin：
+这里 `x` 是样本 embedding，`W_j` 是第 `j` 个身份类别的 prototype，`theta_j` 是样本到该 prototype 的夹角。为了让归一化后的 `[-1,1]` logit 仍有足够梯度，通常引入 scale `s`：
 
 $$
-\mathcal{L}_{CosFace}
+\mathcal{L}_{norm}
 =
 -\log
-\frac{e^{s(\cos\theta_y-m)}}
-{e^{s(\cos\theta_y-m)}+\sum_{j\ne y}e^{s\cos\theta_j}}.
+\frac{e^{s\cos\theta_y}}
+{e^{s\cos\theta_y}+\sum_{j\ne y}e^{s\cos\theta_j}}.
 $$
 
-ArcFace 在角度上加 margin：
+忽略 L2 normalize 的 Jacobian，只看 normalized embedding `x` 上的 softmax CE 梯度：
 
 $$
-\mathcal{L}_{ArcFace}
+\frac{\partial \mathcal{L}_{norm}}{\partial x}
+=
+s\left(
+\sum_j p_j W_j - W_y
+\right)
+=
+s\left(
+(p_y-1)W_y+\sum_{j\ne y}p_j W_j
+\right).
+$$
+
+梯度下降会把 `x` 拉向自己的 prototype `W_y`，并按 `p_j` 的大小远离其他 prototype。越容易混淆的负类，`p_j` 越大，排斥项越强。类内聚合和类间分离来自同一个归一化候选集合中的 prototype 竞争。
+
+普通 normalized softmax 的不足是判别边界太宽松：对两个类别 `y` 和 `k`，只要 `cos(theta_y) > cos(theta_k)` 就能把样本判给 `y`。它要求正确 prototype 赢，但没有要求赢出明确角度间隔。
+
+### 5.2 Margin softmax：只让正确类别变难
+
+margin softmax 的统一写法是：负类 logit 仍然是 `s cos(theta_j)`，只把正确类别 logit 从 `s cos(theta_y)` 改成更严格的 `s phi(theta_y)`：
+
+$$
+\mathcal{L}_{margin}
 =
 -\log
-\frac{e^{s\cos(\theta_y+m)}}
-{e^{s\cos(\theta_y+m)}+\sum_{j\ne y}e^{s\cos\theta_j}}.
+\frac{e^{s\phi(\theta_y)}}
+{e^{s\phi(\theta_y)}+\sum_{j\ne y}e^{s\cos\theta_j}}.
 $$
 
-**Loss 归类与等价视角。** CosFace/ArcFace 属于 supervised margin softmax。它们和 InfoNCE 一样使用 softmax cross entropy，也有 positive logit 和 negative logits；不同点是候选不是样本或 view，而是类别 prototype。CosFace 在 cosine 空间加 margin，ArcFace 在角度空间加 margin，本质上都是对正确类别 logit 做更严格的几何约束。
+不同方法的差异主要在 `phi(theta_y)`：
 
-代码化看，它和“对正确候选做 cross entropy”同构：
+| 方法                   | margin 类型        | 正确类别 logit                                  | 直觉                                   |
+| ---------------------- | ------------------ | ----------------------------------------------- | -------------------------------------- |
+| SphereFace / A-Softmax | 乘性角度 margin    | `s psi(theta_y)`, 近似看作 `s cos(m * theta_y)` | 让正确类别角度按倍数变严格             |
+| AM-Softmax / CosFace   | 加性 cosine margin | `s(cos(theta_y) - m)`                           | 要求正确类别 cosine 比负类高出固定间隔 |
+| ArcFace                | 加性角度 margin    | `s cos(theta_y + m)`                            | 直接要求正确类别角度小出固定间隔       |
+
+SphereFace 的原始实现为了保证 `theta` 区间上的单调性，会使用分段函数 `psi(theta)`，而不是裸用 `cos(m theta)`。CosFace 和 AM-Softmax 的核心形式都是在 target cosine 上减去 additive margin；ArcFace 则把 margin 加到角度上，再取 cosine。
+
+决策边界能说明三者的差异。二分类时，normalized softmax 只要求 `cos(theta_y) > cos(theta_k)`；CosFace 要求 `cos(theta_y) - m > cos(theta_k)`；ArcFace 要求 `cos(theta_y + m) > cos(theta_k)`，在 `0` 到 `pi` 的单调区间里近似等价于 `theta_y + m < theta_k`。这就是 ArcFace 被称为 additive angular margin 的原因：它直接在角度空间规定间隔。CosFace 的间隔发生在 cosine 空间，映射到角度空间后不是常数；SphereFace 是乘性角度约束，优化更硬，早期训练更依赖 annealing 和实现细节。
+
+### 5.3 为什么 margin 会同时增强类内和类间
+
+margin 只改正确类别 logit，看起来像只在拉近类内，实际会同时影响两边。
+
+首先，`phi(theta_y)` 比 `cos(theta_y)` 更小，同一个样本在原本已经分类正确时仍可能得到较高 loss。为了降低 loss，模型必须继续减小 `theta_y`，也就是把样本压向自己的 prototype，类内更紧。
+
+其次，softmax 分母中的负类没有消失。只要某个负类 prototype 与样本夹角小，它的 `p_j` 就会大，梯度中的 `p_j W_j` 会继续把样本从该负类方向推开。类别权重 `W_j` 本身也被反向传播更新：本类样本拉动自己的 prototype，其他类样本通过负类概率对它形成排斥。长期训练后，prototype 之间也会形成更大的角度间隔。
+
+因此，人脸识别里的 margin softmax 可以看成“监督、有 class prototype 的对比学习几何”：anchor 是样本特征，positive 是正确身份 prototype，negative 是其他身份 prototype，dictionary 是分类头的全部类别权重。
+
+### 5.4 代码化实现
+
+下面的伪代码把 normalized softmax、SphereFace、CosFace/AM-Softmax、ArcFace 放进同一个框架。核心动作只有一个：先算完整 `B x C` cosine 矩阵，再替换正确类别那一列的 target logit。
 
 ```python
-def arcface_step(features, labels, class_weights, scale, margin):
+def sphereface_phi(theta, integer_margin):
+    # SphereFace/A-Softmax 的教学化写法。
+    # 原论文使用分段 psi(theta) 保证目标 logit 随 theta 单调下降。
+    k = floor(integer_margin * theta / pi)
+    return ((-1) ** k) * cos(integer_margin * theta) - 2 * k
+
+
+def margin_softmax_step(features, labels, class_weights, scale, margin, kind):
+    # features: [B, D]，样本 embedding。
+    # class_weights: [D, C]，每一列是一个身份类别 prototype。
     x = l2_normalize(features, axis=1)
     W = l2_normalize(class_weights, axis=0)
 
-    cos_theta = x @ W                              # [B, C]
-    theta_y = arccos(gather(cos_theta, labels))
-    target_logit = cos(theta_y + margin)
+    # cos_theta[b, c] 是第 b 个样本和第 c 个类别 prototype 的角度相似度。
+    cos_theta = clip(x @ W, -1 + 1e-7, 1 - 1e-7)  # [B, C]
+    target_cos = gather(cos_theta, labels)         # [B]
+    target_theta = arccos(target_cos)
+
+    if kind == "normalized":
+        target_phi = target_cos
+    elif kind == "sphereface":
+        target_phi = sphereface_phi(target_theta, integer_margin=margin)
+    elif kind == "cosface":
+        target_phi = target_cos - margin
+    elif kind == "arcface":
+        target_phi = cos(target_theta + margin)
+    else:
+        raise ValueError(kind)
 
     logits = cos_theta.copy()
-    logits[arange(len(labels)), labels] = target_logit
+    logits[arange(len(labels)), labels] = target_phi
     logits = logits * scale
     return cross_entropy(logits, labels)
 ```
 
-共同点：
+**Loss 归类与等价视角。** 这些方法仍然是 softmax cross entropy，差异集中在正确类别 logit 的 margin 变换上：SphereFace 做乘性角度 margin，CosFace/AM-Softmax 做加性 cosine margin，ArcFace 做加性角度 margin。和 SimCLR/MoCo/CLIP 的差别在 dictionary：这里的候选是有监督类别 prototype，而不是 batch view、queue key 或图文配对。
 
-- 都在单位超球面上比较相似度。
-- 都通过 softmax 把 positive 和 negative 放进同一个竞争集合。
-- 都把“类内紧凑、类间分离”变成可优化的几何约束。
+<a id="sec-6"></a>
 
-差别也很重要：ArcFace/CosFace 的 positive 是人工身份标签对应的类别 prototype；SimCLR/MoCo 的 positive 是增强或同实例构造出来的 key；CLIP 的 positive 是图文配对。因此，人脸识别 loss 更准确地说是“监督、有 prototype 的对比几何”，不是自监督 contrastive pretraining。
-
-## 6. 健康生理信号应用预研：ECG-PPG 可以借鉴对比学习，但不能照搬
-
-这一节是个人兴趣方向的预研，不属于前面视觉/多模态对比学习技术路线的通识部分。
-
-ECG 记录心脏电活动，PPG 记录外周血容量变化。两者共享心动周期信息，但并非同步到同一瞬间：ECG 的 R peak 到 PPG 脉搏峰之间存在 pulse transit time，受血压、血管状态、测量位置和个体差异影响。
-
-一个可讨论的 ECG-PPG 对比学习设定：
-
-| 组件          | 设计                                                                            |
-| ------------- | ------------------------------------------------------------------------------- |
-| encoder       | ECG encoder 与 PPG encoder，或共享部分时序 backbone                             |
-| positive      | 同一受试者、同一时间附近、校正延迟后的 ECG-PPG 窗口                             |
-| negative      | 不同时间、不同受试者、不同状态窗口                                              |
-| hard negative | 同一受试者但错位窗口，用来逼迫模型关注同步生理状态                              |
-| augmentation  | 带通滤波、幅值缩放、局部 dropout、轻微 jitter；不能破坏 R-R interval 或脉搏间期 |
-| downstream    | HR、HRV、血压 proxy、睡眠/压力状态、异常检测                                    |
-
-可以借鉴 CLIP 式双塔目标：
-
-$$
-S_{ij}=\frac{z_i^{ECG\top}z_j^{PPG}}{\tau},
-$$
-
-$$
-\mathcal{L}
-=
-\frac{1}{2}
-\left(
-\operatorname{CE}(S,\operatorname{diag})
-+
-\operatorname{CE}(S^\top,\operatorname{diag})
-\right).
-$$
-
-**Loss 归类与等价视角。** 这个 ECG-PPG 目标是 CLIP-style symmetric InfoNCE。ECG 到 PPG 的方向是在一批 PPG 窗口中找同步窗口；PPG 到 ECG 方向反过来。它的数学形式和 CLIP 一样，但 positive 的可靠性依赖时间同步、延迟校正和受试者级切分；这里的核心风险不是 loss 公式，而是生理数据构造是否把真实同步关系和身份/设备捷径区分开。
-
-代码化实现：
-
-```python
-def ecg_ppg_contrast_step(ecg_window, ppg_window, ecg_encoder, ppg_encoder, tau):
-    z_ecg = l2_normalize(ecg_encoder(ecg_window), axis=1)
-    z_ppg = l2_normalize(ppg_encoder(ppg_window), axis=1)
-
-    # 第 i 段 ECG 与第 i 段 PPG 需要先做时间同步或延迟校正。
-    # 对角线是同一生理窗口的跨模态 positive；非对角线是 batch 内 negative。
-    logits = (z_ecg @ z_ppg.T) / tau
-    labels = arange(len(ecg_window))
-
-    loss_ep = cross_entropy(logits, labels)
-    loss_pe = cross_entropy(logits.T, labels)
-    return 0.5 * (loss_ep + loss_pe)
-```
-
-潜在价值：
-
-- 不必为每个窗口标注 HRV 或健康状态，也能用同步信号学习表征。
-- PPG 更容易穿戴采集，ECG 更接近电生理基准，跨模态对齐可能提升 PPG-only 下游任务。
-- 多传感器 wearable 场景天然存在“同一生理事件的不同观测”。
-
-主要风险：
-
-- 身份泄漏：模型学会同一人的 ECG/PPG 风格，而不是窗口内生理状态。
-- 设备泄漏：采样率、滤波器、传感器位置变成捷径。
-- 时间错配：PPG 延迟未建模时，positive 本身含噪。
-- 下游混淆：HR 相对容易，HRV 对 R-R 或 peak interval 精度要求更高，不能只看全局 embedding。
-- 医学结论外推：对比学习能学表征，不自动证明某个生理指标可被可靠预测。
-
-更稳的实验协议应按受试者划分 train/val/test，用同一受试者错位窗口构造 hard negative，并分别评估 HR、HRV、跨设备泛化和跨人群泛化。窗口级随机划分很可能导致虚高。
-
-## 7. 面试复写线索
-
-1. 对比学习的核心不是某个固定 loss，而是 anchor、positive、negative、dictionary 的定义。
-2. Triplet loss 是 margin ranking；NCE 是大规模归一化近似；InfoNCE/NT-Xent/CLIP loss 是候选集合 softmax；MINE 是互信息估计器。
-3. InstDisc 用 memory bank 做大规模实例分类，但历史特征不一致；MoCo 用 queue 控制字典规模，用 momentum encoder 提升一致性；SimCLR 用大 batch 替代显式字典结构。
-4. BYOL、SimSiam、DINO 说明显式 negative 不是唯一解，关键是用 stop-gradient、predictor、EMA teacher、centering 等机制避免坍缩。
-5. CLIP 把对比学习从同图增强推广到图文配对，本质上是相似度矩阵对角线的双向分类。
-6. ArcFace/CosFace 体现了同一套几何语言：单位球面、角度 margin、类内紧凑、类间分离。
-
-## 8. 理解检查
+## 6. 理解检查
 
 - 为什么说 SimCLR、CMC、CLIP 的矩阵对角线都是 positive，但它们学到的不变性不同？
 - MoCo 的 queue 为什么能比 batch 大很多？为什么又需要 momentum encoder？
@@ -940,9 +1253,11 @@ def ecg_ppg_contrast_step(ecg_window, ppg_window, ecg_encoder, ppg_encoder, tau)
 - projection head 为什么常常训练时保留、下游评估时丢掉？
 - BYOL 和 SimSiam 没有显式负样本，分别依赖哪些结构避免坍缩？
 - CLIP 代码里 `logits[i, j]` 的行 softmax 和列 softmax 分别对应什么检索方向？
-- ECG-PPG 对比学习中，为什么窗口级随机划分可能导致虚高？
+- 为什么 CosFace/ArcFace 只改正确类别 logit，却能同时增强类内紧凑和类间分离？
 
-## 9. 主要出处
+<a id="sec-7"></a>
+
+## 7. 主要出处
 
 主线论文：
 
@@ -957,6 +1272,8 @@ def ecg_ppg_contrast_step(ecg_window, ppg_window, ecg_encoder, ppg_encoder, tau)
 - SimSiam: [Exploring Simple Siamese Representation Learning](https://arxiv.org/abs/2011.10566), 2020/2021.
 - MoCo v3: [An Empirical Study of Training Self-Supervised Vision Transformers](https://arxiv.org/abs/2104.02057), 2021.
 - DINO: [Emerging Properties in Self-Supervised Vision Transformers](https://arxiv.org/abs/2104.14294), 2021.
+- DeViSE: [DeViSE: A Deep Visual-Semantic Embedding Model](https://papers.nips.cc/paper_files/paper/2013/hash/7cce53cf90577442771720a370c3c723-Abstract.html), 2013.
+- Visual N-Grams: [Learning Visual N-Grams from Web Data](https://arxiv.org/abs/1612.09161), 2016/2017.
 - CLIP: [Learning Transferable Visual Models From Natural Language Supervision](https://arxiv.org/abs/2103.00020), 2021.
 
 Loss 与相关连接：
@@ -964,11 +1281,7 @@ Loss 与相关连接：
 - FaceNet: [A Unified Embedding for Face Recognition and Clustering](https://arxiv.org/abs/1503.03832), 2015.
 - NCE: [Noise-contrastive estimation: A new estimation principle for unnormalized statistical models](https://proceedings.mlr.press/v9/gutmann10a.html), 2010.
 - MINE: [Mutual Information Neural Estimation](https://arxiv.org/abs/1801.04062), 2018.
+- SphereFace: [SphereFace: Deep Hypersphere Embedding for Face Recognition](https://arxiv.org/abs/1704.08063), 2017.
+- AM-Softmax: [Additive Margin Softmax for Face Verification](https://arxiv.org/abs/1801.05599), 2018.
 - CosFace: [Large Margin Cosine Loss for Deep Face Recognition](https://arxiv.org/abs/1801.09414), 2018.
 - ArcFace: [Additive Angular Margin Loss for Deep Face Recognition](https://arxiv.org/abs/1801.07698), 2018.
-
-中文二级阅读材料可用于补充直觉和表达，但公式、机制和时间线以上述论文为准：
-
-- [知乎：对比学习相关整理](https://zhuanlan.zhihu.com/p/346686467)
-- [知乎：对比学习综述笔记](https://zhuanlan.zhihu.com/p/555359995)
-- [Bilibili 笔记：对比学习相关内容](https://www.bilibili.com/h5/note-app/view?cvid=14700928&pagefrom=comment)

@@ -1,52 +1,27 @@
 ---
 layout: post
-title: "Distributed Training for Large Models: Collectives, ZeRO/FSDP, Tensor Parallelism, and Pipeline Parallelism"
+title: "Distributed Training for Large Models: Collectives, ZeRO/FSDP, Tensor, Pipeline, and Expert Parallelism"
 date: 2026-03-16 00:00:00
-description: 从 collective 通信、DDP/FSDP/ZeRO 到 TP/PP/SP/EP 的大模型训练并行笔记。
+description: 从 parameter、activation、gradient、optimizer state 的生命周期出发，梳理 All-Reduce/All-Gather/Reduce-Scatter/All-to-All、DDP、ZeRO/FSDP、TP/PP/SP/CP/EP 及显存-通信权衡。
 tags: distributed-training large-language-models ai-infra deep-learning-systems
 categories: ai-infra
 ---
 
 ## 开篇总结
 
-大模型训练的核心张力是：显存希望每个 rank 少存一点，吞吐希望每个 rank 多算一点，数学等价性又要求该同步的数据必须同步。分布式训练的难点正是在这三者之间做切分和通信的交换。
+本文重点如下：
 
-- 通信原语不是背景知识，而是并行策略的“接口”：DDP 的梯度同步落在 All-Reduce，FSDP/ZeRO-3 的参数重建落在 All-Gather，梯度分片落在 Reduce-Scatter，MoE token 路由落在 All-to-All。
-- 并行策略的区别不在名字，而在切分对象：DP 切 batch，TP 切单层矩阵，PP 切层，SP/CP 切序列或上下文，EP 切 expert，ZeRO/FSDP 切模型状态。
-- 显存估算必须逐项拆开：parameter、gradient、optimizer state、activation、communication buffer、临时 full parameter 的峰值不能混在一句“省 N 倍”里。
-- 3D/4D/5D 并行不是固定标准术语；更可追问的表达是说明每个 process group 负责哪种切分，以及 forward/backward/optimizer step 中触发什么通信。
-- 没有多 GPU 环境时，CPU-only 仿真仍然有价值：它不能替代真实性能 profiling，但能把“每个 rank 通信前后持有什么”固定成可打印的 tensor。
-
-主线可以压缩成一条链：
-
-```text
-单卡训练为什么不够
--> 哪些 tensor 或状态可以被切分
--> 切分后需要哪些 collective 通信
--> 通信量和显存如何变化
--> 多种并行策略如何组合成 3D/4D/5D 训练
--> PyTorch FSDP、DeepSpeed ZeRO、Megatron-LM 等框架分别落在哪些抽象层
-```
-
-相比普通通识介绍，本文更关注三个抓手：
-
-- 数据流：一次 step 中 batch、activation、parameter、gradient、optimizer state 到底在哪里产生、在哪里通信、在哪里释放。
-- 通信成本：All-Gather、Reduce-Scatter、All-Reduce 不只看输入输出，还要看每个 rank 发送多少字节、需要多少通信轮次。
-- 组合视角：DP/DDP、TP、PP、SP/CP、EP、ZeRO/FSDP 不是互斥选项，而是分别切不同维度，最终组成大模型训练中的多维并行。
-
-配套代码：
-
-- `examples/fsdp_zero3_sim.py`：CPU-only FSDP / ZeRO-3 数值实验，用两个虚拟 rank 展示参数分片、all-gather、reduce-scatter 和 shard optimizer update。
-- `examples/collectives_cost_sim.py`：CPU 上模拟常见 collective 的输入输出语义，并用简单 `alpha-beta` 模型估算通信开销。
-- `examples/collective_cost_model.py`：共享的 `alpha-beta` 与 ring collective 成本模型，供 collective 语义脚本和策略估算脚本复用。
-- `examples/memory_comm_estimator.py`：把 DDP、ZeRO-1/2/3、FSDP 的模型状态显存和通信量放在同一张估算表里。
-- `examples/tp_linear_sim.py`：手写 column-parallel linear 和 row-parallel linear，并对照完整 Linear 验证 forward/backward 等价。
+- 分布式训练首先是对象生命周期问题。一次 step 里，batch、parameter、activation、gradient、optimizer state 分别在哪里产生、是否复制、何时通信、何时释放，决定了显存峰值、通信量和数学等价性。
+- 单卡、单机多卡、多机多卡对应不同瓶颈。DDP 主要沿 batch 维度扩展吞吐，也能在固定 global batch 时降低每卡 activation；FSDP/ZeRO 切模型状态；TP/PP/SP/CP/EP 分别切单层矩阵、层、序列/上下文和 expert。多机多卡时，process group 的拓扑比“用了几 D 并行”更重要。
+- 通信原语是并行策略的边界条件。All-Gather 临时重建 FSDP 参数，Reduce-Scatter 把梯度规约回 shard，All-Reduce 让 DDP 的完整模型副本得到同一份全局梯度，All-to-All 承担 MoE token 路由。
+- 显存估算不能只说“省 N 倍”。参数、梯度、optimizer state、activation、communication buffer、prefetch buffer、当前 FSDP unit 的 full parameter 必须分开计算；通信 tensor 的 dtype 也会直接改变 bytes/rank。
+- 组合并行不是名词堆叠。更稳定的分析方式是先说明每个 process group 切什么对象，再说明 forward、backward、optimizer step 中触发哪些 collective，以及这些 collective 落在单机高速互联还是跨机网络上。
 
 ## 目录
 
-- [1. 学习边界和心智模型](#1-学习边界和心智模型)
-- [2. 从单卡训练 step 出发](#2-从单卡训练-step-出发)
-- [3. 通信原语：语义、出现位置和通信量](#3-通信原语语义出现位置和通信量)
+- [1. 范围与核心关系](#1-范围与核心关系)
+- [2. 从单卡到单机多卡再到多机多卡](#2-从单卡到单机多卡再到多机多卡)
+- [3. 通信原语：从基础操作到组合 collective](#3-通信原语从基础操作到组合-collective)
 - [4. 数据并行：DP 与 DDP](#4-数据并行dp-与-ddp)
 - [5. 状态分片：ZeRO 与 FSDP](#5-状态分片zero-与-fsdp)
 - [6. 张量并行：把单层矩阵乘法切开](#6-张量并行把单层矩阵乘法切开)
@@ -58,18 +33,17 @@ categories: ai-infra
 - [12. 主流训练框架的关系](#12-主流训练框架的关系)
 - [13. 关键时间线和出处](#13-关键时间线和出处)
 - [14. 如何使用本项目的代码实验](#14-如何使用本项目的代码实验)
-- [15. 面试表达线索](#15-面试表达线索)
 
-## 1. 学习边界和心智模型
+## 1. 范围与核心关系
 
-本项目面向 AI infra 大模型算法岗位，不以 CUDA 算子开发或 NCCL kernel 实现为主线。更重要的是能解释清楚：
+这份笔记不展开 CUDA kernel、NCCL 内部实现和具体集群运维，重点放在训练系统中最常见的抽象边界：
 
-- 大模型训练的瓶颈来自哪里：显存、算力、通信、训练稳定性。
-- 哪些对象可以切：数据、参数、层、张量维度、序列维度、专家、优化器状态。
-- 切完以后如何恢复数学等价性：通过 All-Reduce、All-Gather、Reduce-Scatter、All-to-All 等 collective。
-- 每种并行策略牺牲什么换来什么：显存、吞吐、通信量、bubble、负载均衡和实现复杂度。
+- 训练瓶颈来自哪里：模型状态显存、activation 显存、算力、通信、训练稳定性。
+- 哪些对象可以切：data、parameter、gradient、optimizer state、activation、layer、tensor dimension、sequence/context、expert。
+- 切完以后如何恢复数学等价性：通过 All-Reduce、All-Gather、Reduce-Scatter、All-to-All、send/recv 等通信。
+- 每种策略付出什么代价：额外通信、临时 buffer、pipeline bubble、负载不均衡、数值累积差异和实现复杂度。
 
-可以用四层心智模型组织所有内容：
+全文按四层关系组织：
 
 ```text
 资源层：多 GPU / 多机提供显存、算力和网络带宽
@@ -78,7 +52,7 @@ categories: ai-infra
 训练层：一次 step 中 parameter、activation、gradient、optimizer state 的生命周期
 ```
 
-不要把“模型并行”理解成一个单一方法。更准确的说法是：不同并行策略切的是不同对象。
+“模型并行”不是单一方法。不同并行策略切的是不同对象，也对应不同通信模式。
 
 | 策略      | 主要切分对象                       | 主要解决问题                       | 典型通信                                  |
 | --------- | ---------------------------------- | ---------------------------------- | ----------------------------------------- |
@@ -89,9 +63,9 @@ categories: ai-infra
 | SP/CP     | sequence/context                   | 长上下文 activation/attention 显存 | All-Gather、Reduce-Scatter、ring exchange |
 | EP        | expert/token routing               | MoE 大参数规模                     | All-to-All / All-to-AllV                  |
 
-## 2. 从单卡训练 step 出发
+## 2. 从单卡到单机多卡再到多机多卡
 
-单卡训练的抽象非常简单：
+单卡训练的抽象只有几行：
 
 ```python
 pred = model(x)
@@ -101,84 +75,153 @@ optimizer.step()
 optimizer.zero_grad()
 ```
 
-分布式训练的所有复杂性，本质上都来自这几行代码里的对象被拆开了：
+分布式训练从这几行出发，把其中的对象拆到不同 rank 上：
 
-- `x` 被数据并行切成不同 rank 的 batch shard。
-- `model` 的参数可能被 DDP 复制，也可能被 FSDP/ZeRO-3 分片。
-- `activation` 可能跨 PP stage 传递，也可能按 sequence 维度分片。
-- `loss.backward()` 产生的梯度可能需要 All-Reduce，也可能只保留 Reduce-Scatter 后的 shard。
-- `optimizer.step()` 可能在每个 rank 更新完整参数，也可能只更新本 rank 的参数分片。
+- `x` 可以按 batch 维度拆成 data shard。
+- `parameter` 可以完整复制，也可以按 FSDP/ZeRO-3 拆成 parameter shard。
+- `gradient` 可以完整同步给每个 rank，也可以 reduce 后只留下 gradient shard。
+- `optimizer state` 可以完整复制，也可以随 parameter shard 一起分片。
+- `activation` 可以跨 pipeline stage 传递，也可以按 sequence/context 维度分片。
 
-### 纯 DDP 的 step
+### 单卡：没有跨 rank 通信
+
+单卡阶段只有一个执行者，所有参数、梯度、优化器状态和 activation 都在同一张卡上。瓶颈主要是显存容量、单卡算力和单卡带宽；这里不需要 collective。
+
+当模型或 batch 不再适合单卡时，有两条最常见的扩展路径：
+
+- 增加吞吐：复制模型，让不同 GPU 处理不同 batch shard，这就是 DP/DDP。
+- 降低单卡显存：切 parameter、gradient、optimizer state、activation 或 layer，这会引入 FSDP/ZeRO、TP、PP、SP/CP 等策略。
+
+DDP 对显存的作用取决于固定什么量：
+
+- 固定 global batch 时，DDP 把 batch 拆成更小的 local batch，每卡 input 和 activation 会下降。
+- 固定 local batch 时，DDP 扩大 global batch，主要收益是吞吐提升，每卡 activation 不会因为 DDP 自动下降。
+
+无论哪种设置，DDP 都不会切 parameters、gradients、optimizer states；如果模型状态本身放不下，需要 ZeRO/FSDP 这类状态分片策略。
+
+### 单机多卡：通信主要发生在同一台机器内
+
+单机多卡通常先从 DDP 开始，因为它最接近单卡训练：
 
 ```text
 global batch
--> DistributedSampler 按 DP rank 切分 batch
--> rank i 拿到 local batch shard
--> 每个 rank 用完整模型副本 forward
--> 每个 rank 计算 local loss
--> backward 产生本地梯度
--> DDP bucket 触发梯度 All-Reduce
--> 每个 rank 用同步后的梯度执行 optimizer step
--> 所有 rank 继续保持相同参数
+-> DistributedSampler 切成 local batch shard
+-> 每个 GPU 有完整模型副本
+-> 每个 GPU 计算 local gradient
+-> gradient All-Reduce
+-> 每个 GPU 用相同全局梯度更新完整模型
 ```
 
-关键点：
-
-- DDP 梯度同步通常发生在每个 training step 的 backward 过程中，而不是每个 epoch 结束。
-- PyTorch DDP 会按 bucket 组织梯度，某个 bucket 中的梯度就绪后就可以启动通信，从而和剩余 backward 计算重叠。
-- DDP 的数学目标是让每个 rank 都拿到等价的全局平均梯度。
-
-### FSDP 的 step
+如果完整模型状态放不下，就引入 FSDP/ZeRO-3：
 
 ```text
-persistent:
-rank i 常驻 parameter_shard_i 和 optimizer_state_shard_i
-
-forward:
-for each wrapped module:
-    all-gather 当前 module 的 parameter shards
-    用完整参数执行本地 batch shard 的 forward
-    reshard/free 完整参数
-
-backward:
-for each wrapped module in reverse:
-    all-gather 当前 module 的 parameter shards
-    计算本地完整梯度
-    reduce-scatter 梯度，得到 rank i 的 gradient shard
-    free 完整参数和完整梯度
-
-optimizer:
-rank i 只用自己的 gradient shard 和 optimizer state shard 更新 parameter shard
+parameter / gradient / optimizer state 常驻分片
+-> forward/backward 前 All-Gather 当前 FSDP unit 参数
+-> backward 后 Reduce-Scatter 梯度
+-> optimizer 只更新本 rank 的 parameter shard
 ```
 
-一句话记忆：
+如果单层矩阵乘法太大或希望提升单层计算并行度，就引入 TP；如果模型层数太多，就引入 PP。单机内通信通常走 NVLink、NVSwitch 或 PCIe，带宽和延迟比跨机网络更友好，所以 TP 这类高频通信策略更倾向优先放在单机高速互联内。
+
+### 多机多卡：必须显式考虑通信拓扑
+
+多机多卡不是简单把单机多卡数量放大。跨机网络延迟更高、带宽更稀缺，策略选择通常要区分 process group：
+
+- DP/FSDP group 常常跨节点扩展总 GPU 数，用于提升 batch 吞吐或分摊模型状态。
+- TP group 更依赖高带宽低延迟，实践中经常优先限制在同节点或同高速互联域内。
+- PP group 可以跨节点切 layer，但会引入 activation send/recv 和 pipeline bubble。
+- EP/MoE 的 All-to-All 对网络拓扑很敏感，跨节点 token dispatch 可能成为主要瓶颈。
+
+因此，多机多卡里的“几 D 并行”不是固定名词，而是多个 process group 的乘积。例如一个训练任务可能同时有：
 
 ```text
-FSDP 参数需要时临时 all-gather，梯度产生后 reduce-scatter 回 shard，optimizer 始终只更新 shard。
+DP group: 负责 batch 维度和梯度/状态同步
+TP group: 负责单层矩阵切分
+PP group: 负责 layer/stage 切分
+SP/CP group: 负责 sequence/context 切分
+EP group: 负责 expert/token routing
 ```
 
-## 3. 通信原语：语义、出现位置和通信量
+### 什么时候进入 ND 并行
 
-通信原语要同时记三件事：
+一维策略解决不了所有问题时，才需要组合成 ND 并行：
 
-- 语义：输入输出 tensor 如何变化。
-- 位置：在训练 step 的哪里出现。
-- 成本：每个 rank 大概发送多少数据，需要多少通信轮次。
+| 问题            | 单一策略  | 继续扩大时的下一步                                 |
+| --------------- | --------- | -------------------------------------------------- |
+| batch 吞吐不足  | DDP       | 增加 DP/FSDP group，注意全局 batch 和优化稳定性    |
+| 模型状态放不下  | ZeRO/FSDP | 结合 TP/PP，减少单层或整模型峰值                   |
+| 单层矩阵太大    | TP        | 结合 SP，减少 TP 带来的 activation 复制            |
+| 层数太多        | PP        | 结合 micro-batch 调度，降低 bubble                 |
+| 序列太长        | SP/CP     | 和 TP/PP/FSDP 组合，控制 attention/activation 显存 |
+| MoE expert 太多 | EP        | 结合 DP/TP，控制 All-to-All 拓扑和负载均衡         |
 
-下面假设有 `N` 个 rank，完整 tensor 大小为 `D` bytes。为了做 chunk-based collective，完整 tensor 通常被切成 `N` 块，每块大小约 `D/N`。
+这条演进线能把后面的章节串起来：通信原语解释 rank 之间如何交换 tensor；并行策略解释为什么需要这些交换；混合并行解释多个交换域如何同时存在。
 
-实际通信时间可以粗略写成：
+## 3. 通信原语：从基础操作到组合 collective
+
+按 `Broadcast -> Scatter -> Gather -> Reduce -> All-Gather -> Reduce-Scatter -> All-Reduce -> All-to-All` 的顺序梳理是合理的。前四个是基础动作：复制、分发、收集、规约；后四个是大模型训练中更常见的全员 collective 或重排 collective。
+
+这个顺序也能避免一个误区：collective 的语义不等于某个固定实现。比如 All-Gather 可以用 naive gather+broadcast 理解，也可以用 ring 实现；All-Reduce 经常用 ring Reduce-Scatter + ring All-Gather 实现。真正要记的是“输入输出语义、训练中出现的位置、通信量级和瓶颈”。
+
+下面假设有 `N` 个 rank，完整 tensor 大小为 `D` bytes，chunk 大小约为 `D/N`。本文的通信量默认统计发送侧 `bytes_per_rank`：
 
 ```text
-time ~= alpha * num_steps + beta * bytes_per_rank
+time ~= alpha * logical_steps + beta * bytes_per_rank
 ```
 
-其中 `alpha` 表示每轮通信延迟，`beta` 表示带宽倒数。大 tensor 更受带宽影响，小 tensor 更受延迟影响。
+`alpha` 是每轮通信延迟，`beta` 是带宽倒数。大 tensor 更受带宽影响，小 tensor 或 rank 很多时更受延迟影响。
 
-### All-Gather
+| 原语           | 语义                                                     | 分布式训练中的典型位置                         |
+| -------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| Broadcast      | root 的完整 tensor 复制给其他 rank                       | DDP 初始化参数、元数据分发                     |
+| Scatter        | root 的 tensor 切成多份分给不同 rank                     | 数据/任务分发的基础操作                        |
+| Gather         | 多个 rank 的 shard 收集到 root                           | checkpoint、指标或 naive All-Gather 的第一阶段 |
+| Reduce         | 多个 rank 的 tensor 规约到 root                          | 指标聚合、参数服务器式规约                     |
+| All-Gather     | 每个 rank 的 shard 拼成完整 tensor，并让所有 rank 都拿到 | FSDP/ZeRO-3 参数临时重建，TP 输出拼接          |
+| Reduce-Scatter | 先规约，再让每个 rank 只保留一个 reduced shard           | FSDP/ZeRO-2/3 梯度同步                         |
+| All-Reduce     | 规约后每个 rank 都拿到完整结果                           | DDP 梯度同步                                   |
+| All-to-All     | 每个 rank 给每个目标 rank 发送不同 chunk                 | MoE token dispatch/combine，某些重排型并行     |
 
-语义：每个 rank 贡献一个 shard，所有 rank 最终都拿到完整拼接结果。
+### Broadcast
+
+Broadcast 是一对多复制：root rank 有完整 tensor，其他 rank 接收同一份副本。
+
+```text
+before:
+rank0 = W
+rank1 = -
+rank2 = -
+rank3 = -
+
+after:
+rank0 = W
+rank1 = W
+rank2 = W
+rank3 = W
+```
+
+DDP 初始化时常用 broadcast-like 同步，让所有模型副本从相同参数开始。它的瓶颈取决于实现：star broadcast 会让 root 成为发送热点，tree broadcast 能降低 root 压力，但仍然是从一个源扩散同一份数据。
+
+### Scatter
+
+Scatter 是一对多分发：root rank 把完整 tensor 切成多个 shard，每个 rank 得到不同 shard。
+
+```text
+before:
+rank0 = [a0, a1, a2, a3]
+
+after:
+rank0 = [a0]
+rank1 = [a1]
+rank2 = [a2]
+rank3 = [a3]
+```
+
+它不是大模型训练中最常被直接点名的 collective，但它是理解数据分发、parameter shard 初始分配和 Reduce-Scatter 中 “scatter” 部分的基础。
+
+### Gather
+
+Gather 是多对一收集：每个 rank 贡献一个 shard，root rank 得到完整拼接结果。
 
 ```text
 before:
@@ -187,83 +230,231 @@ rank1 = [a1]
 rank2 = [a2]
 rank3 = [a3]
 
-after:
+after on root:
 rank0 = [a0, a1, a2, a3]
-rank1 = [a0, a1, a2, a3]
-rank2 = [a0, a1, a2, a3]
-rank3 = [a0, a1, a2, a3]
 ```
 
-特点：
+Gather 容易形成 root 接收热点。All-Gather 可以被 naive 地理解成 Gather + Broadcast，但这只是实现视角，不是 All-Gather 的语义定义。
 
-- 不做 sum/max 等规约，只收集并拼接。
-- 常用于 FSDP/ZeRO-3 中从参数 shard 临时重建完整参数。
-- Ring all-gather 中，每个 rank 发送约 `(N-1)/N * D` bytes，通信轮次约 `N-1`。
-- 不应简单说“通信量与节点数无关”。更准确是：当 `N` 增大时，单 rank 发送量趋近于 `D`，但通信轮次仍随 `N` 增长。
+### Reduce
 
-### Reduce-Scatter
-
-语义：先对所有 rank 的完整 tensor 做规约，再把规约结果按 chunk 分散给不同 rank。
+Reduce 是多对一规约：每个 rank 有同形状 tensor，root rank 得到 sum/max/min 等规约结果。
 
 ```text
 before:
-rank0 = [x_00, x_01, x_02, x_03]
-rank1 = [x_10, x_11, x_12, x_13]
-rank2 = [x_20, x_21, x_22, x_23]
-rank3 = [x_30, x_31, x_32, x_33]
+rank0 = g0
+rank1 = g1
+rank2 = g2
+rank3 = g3
 
-after with SUM:
-rank0 = [x_00 + x_10 + x_20 + x_30]
-rank1 = [x_01 + x_11 + x_21 + x_31]
-rank2 = [x_02 + x_12 + x_22 + x_32]
-rank3 = [x_03 + x_13 + x_23 + x_33]
+after on root with SUM:
+rank0 = g0 + g1 + g2 + g3
 ```
 
-特点：
+DDP 不使用普通 Reduce 做最终梯度同步，因为只有 root 拿到结果会导致其他 rank 无法更新自己的完整模型副本。DDP 需要的是 All-Reduce：每个 rank 都拿到规约后的完整梯度。
 
-- 每个 rank 只得到规约结果的 `1/N`。
-- 常用于 ZeRO-2 和 FSDP/ZeRO-3 的梯度同步。
-- Ring reduce-scatter 中，每个 rank 发送约 `(N-1)/N * D` bytes，通信轮次约 `N-1`。
-- 它比 All-Reduce 更适合“后续只需要梯度分片”的场景，因为没有必要把完整规约梯度再复制给每个 rank。
+### All-Gather
+
+All-Gather 是“所有 rank 都拿到完整拼接结果”：
+
+```text
+before:
+rank0 = [p0]
+rank1 = [p1]
+rank2 = [p2]
+rank3 = [p3]
+
+after:
+rank0 = [p0, p1, p2, p3]
+rank1 = [p0, p1, p2, p3]
+rank2 = [p0, p1, p2, p3]
+rank3 = [p0, p1, p2, p3]
+```
+
+FSDP/ZeRO-3 中最典型的 All-Gather 对象是当前 FSDP unit 的 parameter shard：
+
+```text
+p_i = rank i 常驻的当前 module parameter shard
+P   = concat(p_0, p_1, ..., p_(N-1))
+```
+
+forward 或 backward 进入该 module 前，每个 rank 临时 all-gather 出完整 `P` 来计算；Adam `m/v`、FP32 master weight 等 optimizer state 不参与前向 All-Gather，仍然保持 sharded。
+
+Ring All-Gather 中，每轮每个 rank 发送一个 `D/N` chunk 给右邻居，同时从左邻居接收一个 chunk。经过 `N-1` 轮后，每个 shard 都传播到所有 rank：
+
+```text
+bytes_per_rank ~= (N - 1) / N * D
+logical_steps  ~= N - 1
+```
+
+它的优势是没有 root 热点，适合大 tensor 和带宽主导通信；瓶颈是 `N-1` 个 logical steps 的延迟，以及 All-Gather 结束后每个 rank 都会临时持有完整 `D`，因此 FSDP 仍要关注 full parameter、communication buffer 和 prefetch 带来的峰值显存。
+
+### Reduce-Scatter
+
+Reduce-Scatter 是“先规约，再分片保留”。在 FSDP/ZeRO-3 的梯度同步里，先把对象定义清楚：
+
+```text
+B_i = rank i 上的 local batch shard
+P_j = 常驻在 rank j 上的 parameter shard
+G_i = rank i 用 B_i 算出来的 local full gradient
+x_{i,j} = G_i 中对应 P_j 位置的 gradient chunk
+```
+
+`x` 不是数据，也不是模型权重，而是梯度的一段。每个 rank 用自己的 local batch 算出一份 local full gradient，然后按 parameter shard 布局切开：
+
+```text
+P   = [P_0,   P_1,   P_2,   P_3  ]
+G_0 = [x_00,  x_01,  x_02,  x_03 ]
+G_1 = [x_10,  x_11,  x_12,  x_13 ]
+G_2 = [x_20,  x_21,  x_22,  x_23 ]
+G_3 = [x_30,  x_31,  x_32,  x_33 ]
+```
+
+一行表示同一个 rank 对不同 parameter shard 的梯度贡献；一列表示不同 local batch 对同一个 parameter shard 的梯度贡献：
+
+```text
+y_0 = x_00 + x_10 + x_20 + x_30 -> rank0 更新 P_0
+y_1 = x_01 + x_11 + x_21 + x_31 -> rank1 更新 P_1
+y_2 = x_02 + x_12 + x_22 + x_32 -> rank2 更新 P_2
+y_3 = x_03 + x_13 + x_23 + x_33 -> rank3 更新 P_3
+```
+
+Ring Reduce-Scatter 不设置 root。每个目标 chunk 沿 ring 访问所有 rank，把同一列的局部贡献累加起来，最后落到拥有对应 parameter shard 的 rank。例如 chunk0 的 reduced gradient 目标是 rank0：
+
+```text
+rank1(x_10) -> rank2(+x_20) -> rank3(+x_30) -> rank0(+x_00) = y_0
+```
+
+实际实现会把所有 chunk 流水化，每轮每个 rank 发送一个 `D/N` 大小的 partial sum：
+
+```text
+bytes_per_rank ~= (N - 1) / N * D
+logical_steps  ~= N - 1
+```
+
+它和 Ring All-Gather 的发送侧通信量相同，但语义相反：All-Gather 是从 shard 扩散成 full tensor；Reduce-Scatter 是从 local full gradient 规约并收缩成 reduced gradient shard。FSDP/ZeRO-3 喜欢 Reduce-Scatter，是因为 optimizer 只需要本 rank parameter shard 对应的 gradient shard，没有必要把完整梯度再复制给所有 rank。
 
 ### All-Reduce
 
-语义：所有 rank 的 tensor 做规约，然后每个 rank 都得到完整规约结果。
+All-Reduce 是“规约后每个 rank 都拿到完整结果”。DDP 梯度同步是最典型场景：
+
+```text
+B_i = rank i 的 local batch shard
+G_i = rank i 用完整模型副本和 B_i 算出的 local full gradient
+G   = sum_i G_i / N
+```
+
+DDP 中每个 rank 都持有完整参数副本，所以每个 rank 都需要完整的同步梯度 `G` 来执行相同 optimizer step：
+
+```text
+before:
+rank0 = G_0
+rank1 = G_1
+rank2 = G_2
+rank3 = G_3
+
+after All-Reduce with SUM:
+rank0 = G_0 + G_1 + G_2 + G_3
+rank1 = G_0 + G_1 + G_2 + G_3
+rank2 = G_0 + G_1 + G_2 + G_3
+rank3 = G_0 + G_1 + G_2 + G_3
+```
+
+Ring All-Reduce 通常可以理解成两段：
 
 ```text
 All-Reduce = Reduce-Scatter + All-Gather
 ```
 
-DDP 中典型用法是对梯度 bucket 做 All-Reduce，使所有 rank 拿到相同的全局平均梯度。实现上经常先 sum，再除以 world size。
+第一段 Reduce-Scatter：把每个 local full gradient `G_i` 切成 chunks `x_{i,j}`，按列规约成 `y_j`，并让 rank j 暂时持有 `y_j`。
 
-Ring all-reduce 成本：
+```text
+G_0 = [x_00, x_01, x_02, x_03]
+G_1 = [x_10, x_11, x_12, x_13]
+G_2 = [x_20, x_21, x_22, x_23]
+G_3 = [x_30, x_31, x_32, x_33]
+
+y_0 = x_00 + x_10 + x_20 + x_30
+y_1 = x_01 + x_11 + x_21 + x_31
+y_2 = x_02 + x_12 + x_22 + x_32
+y_3 = x_03 + x_13 + x_23 + x_33
+
+after Reduce-Scatter:
+y_0 -> rank0
+y_1 -> rank1
+y_2 -> rank2
+y_3 -> rank3
+```
+
+第二段 All-Gather：把这些 reduced gradient shard 再 all-gather 给所有 rank。以 `N = 4` 为例，这一段可以理解成 `y_j` 沿 ring 继续扩散：
+
+```text
+初始:
+rank0 = [y_0]
+rank1 = [y_1]
+rank2 = [y_2]
+rank3 = [y_3]
+
+step 1:
+rank0 -> rank1: y_0
+rank1 -> rank2: y_1
+rank2 -> rank3: y_2
+rank3 -> rank0: y_3
+
+rank0 = [y_0, y_3]
+rank1 = [y_1, y_0]
+rank2 = [y_2, y_1]
+rank3 = [y_3, y_2]
+
+step 2:
+rank0 -> rank1: y_3
+rank1 -> rank2: y_0
+rank2 -> rank3: y_1
+rank3 -> rank0: y_2
+
+rank0 = [y_0, y_3, y_2]
+rank1 = [y_1, y_0, y_3]
+rank2 = [y_2, y_1, y_0]
+rank3 = [y_3, y_2, y_1]
+
+step 3:
+rank0 -> rank1: y_2
+rank1 -> rank2: y_3
+rank2 -> rank3: y_0
+rank3 -> rank0: y_1
+```
+
+最后每个 rank 都拿到完整规约梯度，只需要按 shard index 重排：
+
+```text
+rank0 = [y_0, y_1, y_2, y_3]
+rank1 = [y_0, y_1, y_2, y_3]
+rank2 = [y_0, y_1, y_2, y_3]
+rank3 = [y_0, y_1, y_2, y_3]
+```
+
+所以 Ring All-Reduce 的成本约为一轮 Ring Reduce-Scatter 加一轮 Ring All-Gather：
 
 ```text
 bytes_per_rank ~= 2 * (N - 1) / N * D
-steps ~= 2 * (N - 1)
+logical_steps  ~= 2 * (N - 1)
 ```
 
-它的带宽利用率通常较好，但小 tensor 或 rank 数很多时，延迟项会变明显。
-
-### Broadcast
-
-语义：root rank 把一份完整数据复制给其他 rank。
-
-常见位置：
-
-- DDP 初始化时同步参数。
-- 某些全局元数据或 checkpoint state 分发。
+它的好处是每个 rank 都得到完整规约结果，适合 DDP 这种完整模型副本场景；代价是通信量约为 Reduce-Scatter 的两倍。如果后续只需要 gradient shard，例如 FSDP/ZeRO-3 optimizer step，就没有必要做完整 All-Reduce。
 
 ### All-to-All
 
-语义：每个 rank 都把不同 chunk 发给不同目标 rank，每个 rank 也从所有 rank 接收属于自己的 chunk。
+All-to-All 是全员重排：每个 rank 都把不同 chunk 发给不同目标 rank，每个 rank 也从所有 rank 接收属于自己的 chunk。
 
-常见位置：
+```text
+rank0 sends: to0=a00, to1=a01, to2=a02, to3=a03
+rank1 sends: to0=a10, to1=a11, to2=a12, to3=a13
 
-- MoE expert parallelism 中 token dispatch 和 combine。
-- 某些 sequence/context parallel 的 token 或 block 重排。
+rank0 receives: a00, a10, ...
+rank1 receives: a01, a11, ...
+```
 
-All-to-AllV 表示不同 rank 到不同目标 rank 的数据量可以不同。MoE 的 token routing 往往动态且不均匀，所以工程上经常需要处理 All-to-AllV 式的不规则通信。
+MoE expert parallelism 中，token 会按 router 分配给不同 expert owner rank，这就是典型 All-to-All / All-to-AllV 场景。All-to-All 的难点不是规约，而是数据量不规则、目标 rank 不均匀和跨节点拓扑敏感；expert 负载不均衡时，慢的 rank 会拖住整步训练。
 
 ## 4. 数据并行：DP 与 DDP
 
@@ -296,9 +487,9 @@ theta <- optimizer(theta, grad)
 - 模型状态显存随模型规模线性增长，不会因为 DP rank 增加而下降。
 - 跨 rank 同步完整梯度，通信量随模型参数量增长。
 
-### PyTorch DDP 的实现抓手
+### PyTorch DDP 的实现要点
 
-面试中可以这样描述 DDP：
+DDP 的关键机制可以概括为：
 
 ```text
 DDP 初始化时同步参数。
@@ -380,7 +571,7 @@ ZeRO 的核心思想是：数据并行 rank 之间不必重复保存所有模型
 
 ### FSDP 和 ZeRO-3 的关系
 
-可以说 FSDP 思想上接近 ZeRO-3，但不要把二者说成完全同一个东西。
+FSDP 思想上接近 ZeRO-3，但二者不应混为同一个实现。
 
 - ZeRO 是 DeepSpeed 提出的减少数据并行冗余状态的一组方法。
 - FSDP 是 PyTorch 中围绕 module wrapping、FlatParameter、reshard、prefetch、mixed precision 等机制实现的 fully sharded data parallel。
@@ -616,7 +807,7 @@ DP + TP + PP + ZeRO/FSDP
 DP + TP + PP + SP/CP
 ```
 
-前者强调模型状态分片，后者强调长序列 activation/attention 分片。回答时不要只说“4D”，要明确第四维到底是什么。
+前者强调模型状态分片，后者强调长序列 activation/attention 分片。只说“4D”没有足够信息，必须明确第四维到底是什么。
 
 ### 5D 并行
 
@@ -634,11 +825,7 @@ DP/FSDP + TP + PP + SP/CP + EP
 - SP/CP：序列或上下文维度切分。
 - EP：MoE expert 和 token routing 切分。
 
-面试中更专业的表达是：
-
-```text
-我不会把 3D/5D 当成死记术语，而会先说明每个 process group 对应哪种切分维度，以及这些 group 在 forward/backward/optimizer step 中分别产生哪些通信。
-```
+分析 3D/5D 并行时，核心不是记住维度数量，而是把每个 process group 对应的切分对象、通信原语和拓扑位置说清楚。
 
 ## 11. 数值精度如何配合分布式训练
 
@@ -712,7 +899,7 @@ Megatron-LM 的代表性价值在于大模型并行策略组合，尤其是：
 
 ### Accelerate、NeMo、Colossal-AI 等
 
-这些工具或框架往往提供更高层的训练配置、launcher、策略封装和生态集成。面试中可以把它们放在“编排层”理解：它们可能调用 PyTorch DDP/FSDP、DeepSpeed 或 Megatron 风格并行策略，而不是每个都从零实现所有 collective。
+这些工具或框架往往提供更高层的训练配置、launcher、策略封装和生态集成。它们可以放在“编排层”理解：可能调用 PyTorch DDP/FSDP、DeepSpeed 或 Megatron 风格并行策略，而不是每个都从零实现所有 collective。
 
 ## 13. 关键时间线和出处
 
@@ -799,20 +986,3 @@ python examples/tp_linear_sim.py
 ```
 
 这个脚本和本文第 6 节对应：完整 Linear 作为 reference，column-parallel 和 row-parallel 分别手写 forward/backward，再比较 `Y`、`dX`、`dW`、`db`。它适合用来检查自己是否真的理解“列并行为什么要 all-reduce dX，行并行为什么要 all-reduce output”。
-
-## 15. 面试表达线索
-
-回答分布式训练问题时，可以固定按这条链路组织：
-
-1. 训练瓶颈是什么：显存、计算、通信、长上下文、MoE 负载。
-2. 切分对象是什么：data、parameter、gradient、optimizer state、layer、tensor、sequence、expert。
-3. 引入什么通信：All-Reduce、All-Gather、Reduce-Scatter、All-to-All、send/recv。
-4. 显存和通信怎么变：哪些状态从完整复制变成 `1/N`，哪些地方增加临时 buffer 或额外通信。
-5. 数据流是否仍数学等价：梯度如何聚合，参数如何保持一致或按 shard 更新。
-6. 工程代价是什么：bucket、prefetch、reshard、bubble、load balance、activation checkpointing、mixed precision。
-
-可以用一句完整的话收束：
-
-```text
-分布式训练的核心不是某个并行名词，而是为每类 tensor 选择合适的切分维度，并用相应 collective 在需要的位置恢复数学等价性，同时控制显存峰值和通信开销。
-```

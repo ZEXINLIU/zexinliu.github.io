@@ -73,11 +73,11 @@ ninja.data = [{
             window.location.href = "/blog/2026/nano-vllm-pipeline-tutorial/";
           
         },
-      },{id: "post-distributed-training-for-large-models-collectives-zero-fsdp-tensor-pipeline-and-expert-parallelism",
+      },{id: "post-distributed-training-for-large-models-collectives-fsdp-zero-devicemesh-and-multi-dimensional-parallelism",
         
-          title: "Distributed Training for Large Models: Collectives, ZeRO/FSDP, Tensor, Pipeline, and Expert Parallelism",
+          title: "Distributed Training for Large Models: Collectives, FSDP/ZeRO, DeviceMesh, and Multi-Dimensional Parallelism",
         
-        description: "从 parameter、activation、gradient、optimizer state 的生命周期出发，梳理 All-Reduce/All-Gather/Reduce-Scatter/All-to-All、DDP、ZeRO/FSDP、TP/PP/SP/CP/EP 及显存-通信权衡。",
+        description: "从一次 training step 中 parameter、activation、gradient、optimizer state 的生命周期出发，梳理 Broadcast/All-Gather/Reduce-Scatter/All-Reduce/All-to-All、DDP、ZeRO/FSDP1/FSDP2、DeviceMesh、TP/PP/SP/CP/EP、process group topology 与显存-通信权衡。",
         section: "Posts",
         handler: () => {
           

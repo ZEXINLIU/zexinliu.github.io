@@ -1,8 +1,8 @@
 ---
 layout: post
-title: "Modern Attention for LLMs: MHA/MQA/GQA, RoPE, MLA, FlashAttention, and MoE"
+title: "Modern Attention for LLMs: KV Cache, RoPE, MLA, FlashAttention, Sparse/Linear Attention, and MoE"
 date: 2026-02-22 00:00:00
-description: 从 MHA/MQA/GQA、RoPE、MLA 到 FlashAttention、MoE 的注意力机制笔记。
+description: 从 Q/K/V 调用接口、MHA/MQA/GQA 与 KV cache 出发，梳理 RoPE/ALiBi/RMSNorm、MLA matrix absorption、FlashAttention online softmax、Sparse/Linear Attention、MoE routing 和 discrete gradient estimators。
 tags: attention transformer large-language-models inference
 categories: ai-infra
 _styles: |
@@ -19,59 +19,64 @@ _styles: |
 
 本文重点包括：
 
-1. **MHA、MQA、GQA 的核心差异不是 attention 公式变了，而是 K/V head 的组织方式变了。** MHA 给每个 query head 配独立 K/V；MQA 让所有 query head 共享一组 K/V；GQA 介于两者之间。真正的收益主要出现在自回归解码：KV cache 更小，显存带宽压力更低。本文会把 `num_q_heads`、`num_kv_heads`、`repeat_kv`、cache shape 和复杂度放在同一个接口里解释。
-2. **Transformer encoder-decoder 与 GPT decoder-only 的差异，最后会落到 attention 调用接口上。** Encoder self-attention、decoder causal self-attention、cross-attention 都可以复用同一个注意力核心，但 Q/K/V 来源、mask、KV cache 生命周期完全不同。本文会解释为什么 cross-attention 是 `Q=decoder, K/V=encoder`，而 decoder-only decode 阶段只输入一个新 token 却能看见全部历史。
-3. **位置编码的难点不只是公式，而是“位置如何进入 QK 点积”。** 原始正弦位置编码把位置加到输入 embedding；RoPE 把 Q/K 当作二维旋转对；ALiBi 直接修改 attention logits。尤其 RoPE，本文会保留原始代码中有价值的多实现视角：偶奇维公式、向量化 rotate、复数乘法、split-half/nanovllm 风格布局。它们解释的是同一个数学对象，但暴露了不同的工程布局问题。
-4. **MLA 的关键不是一句“压缩 KV cache”，而是两次矩阵吸收如何成立，以及为什么 RoPE 路径不能一起吸收。** 内容路径可以利用结合律把 $$(c^QW^{UQ})(c^{KV}W^{UK})^\top$$ 改写成 $$c^Q\left(W^{UQ}(W^{UK})^\top\right)(c^{KV})^\top$$；输出路径也可以把 $W^{UV}$ 和 $W^O$ 合并。但 RoPE key 是位置相关路径，旋转矩阵随位置变化，不能简单并进同一个 latent KV。
-5. **FlashAttention 不是把 $O(T^2)$ attention 变成线性 attention，而是在 exact attention 下减少中间矩阵和 HBM/SRAM 往返。** 它的灵魂是 online softmax：只维护每行的最大值 $m$、归一化分母 $l$ 和输出累积量 $O$，就能 block by block 合并完整 softmax。本文会解释 v1/v2 在循环顺序和输出写回上的差异，也会说明 CPU-only 环境能复现什么、不能复现什么。
-6. **长上下文、Sparse Attention、Linear Attention 不是同一类优化。** 长上下文 RoPE 扩展主要改位置到角度的映射；Sparse Attention 改 token 可见图；Linear Attention 改 softmax kernel 或计算结合方式。它们都服务长序列，但牺牲点完全不同。
-7. **MoE 与 Attention 的关系经常被混在一起，但它通常不是 attention 机制本身。** MoE 多数时候替换 FFN 层，用路由器让不同 token 走不同专家；MLA/FlashAttention 处理 attention/cache/IO，MoE 处理参数容量和条件计算。现代模型可以同时使用这些机制。
-8. **离散选择是 MoE、VQ-VAE 等模型训练中的共同难点。** Top-1/Top-k 路由、categorical sampling、codebook argmin 都会在前向中产生硬选择，但 argmax/argmin 本身不可导。本文会补充 Gumbel-Softmax、soft relaxation、Straight-Through estimator 等常见处理方式，并用 VQ-VAE 的 codebook lookup 作为对照例子。
+1. **MHA、MQA、GQA 的变化落在 K/V head 和 KV cache。** 标准 attention 公式仍然是 $\mathrm{softmax}(QK^\top/\sqrt{d_h})V$；自回归解码成本主要受 `num_q_heads`、`num_kv_heads`、`repeat_kv` 的位置影响，也取决于 cache 中保存紧凑 K/V 还是 repeat 后的 K/V。
+2. **Encoder-decoder、decoder-only、cross-attention 共享一个 attention 核心，却有三套 Q/K/V 来源和 mask 语义。** Cross-attention 是 `Q=decoder, K/V=encoder`；decoder-only 增量解码时只输入一个新 token，但依靠 KV cache 看到全部历史，mask 的 diagonal 也必须随 `past_len` 改变。
+3. **位置编码要沿着“位置 $\rightarrow$ 相位 $\rightarrow$ QK score”追踪。** 正弦绝对位置编码把多频率相位加进 hidden state，外推时模型要解释训练外的绝对相位组合；RoPE 只在 Q/K 点积前旋转，长上下文问题集中到相对相位差和角度映射。RoPE 的偶奇维、向量化、复数、split-half 写法也会在这里对齐。
+4. **MLA 同时处理 latent 尺度、cache 形态和矩阵吸收边界。** RMSNorm 先稳定 $c^Q,c^{KV}$ 的尺度；content path 可以把 $W^{UQ}(W^{UK})^\top$ 和 $W^{UV}W^O$ 吸收掉；共享 RoPE key $k^R$ 没有 head 维度，但旋转矩阵依赖位置，无法并成同一个固定吸收矩阵。
+5. **FlashAttention 保持 exact attention，优化的是 online softmax 状态和 HBM/SRAM 读写。** 一行 attention 可以只维护最大值 $m$、归一化分母 $l$ 和输出累积量 $O$，逐 block 合并完整 softmax；v1/v2 的差异主要体现在循环顺序、状态写回次数和 GPU kernel 的工作划分。
+6. **长上下文、Sparse Attention、Linear Attention 分别改三件不同的事。** RoPE 扩展改位置到角度的映射；Sparse Attention 改 token 可见图；Linear Attention 改 softmax kernel 或计算结合方式。它们都服务长序列，但牺牲点和适用边界不同。
+7. **MoE 通常接在 attention 之后，负责条件计算和参数容量。** Attention 先完成跨 token 信息混合，MoE-FFN 再让不同 token 进入不同专家；因此 MLA、FlashAttention 和 MoE 可以同时出现，前两者处理 attention/cache/IO，MoE 处理 FFN 容量和专家分工。
+8. **离散选择把 MoE 路由、categorical sampling、VQ-VAE codebook lookup 连接到同一个训练问题。** Top-1/Top-k、argmax、argmin 的前向结果是硬选择，反向不能直接传梯度；Gumbel-Softmax、soft relaxation、Straight-Through estimator 和 soft F1 surrogate 都是在不同偏差/稳定性之间取舍。
 
-读这些机制时，可以始终追问一个问题：它到底是在改变**表达能力**、改变**接口组织**、改变**cache/内存布局**，还是改变**硬件执行路径**。这个问题比记住更多缩写更重要，因为很多看似相似的 attention 变体，真正改变的层次并不一样。
+## 目录
 
-## 阅读地图
-
-- [技术发展路径](#技术发展路径)：先把各机制放到时间线上，避免孤立理解。
-- [MHA、MQA、GQA](#2-mhamqagqa)：理解 query head 与 KV head 的接口差异。
-- [Transformer Encoder-Decoder 与 Decoder-Only](#3-transformer-encoder-decoder-与-decoder-only)：理解 attention 核心如何在不同结构中被调用。
-- [位置编码](#4-位置编码)：从绝对位置、RoPE 到 ALiBi，重点看位置如何进入 score。
-- [MLA](#5-mla从-kv-cache-压缩到矩阵吸收)：理解 latent KV、矩阵吸收和 RoPE 路径边界。
-- [FlashAttention](#6-flashattentionexact-attention-的-io-优化)：理解 online softmax 和 CPU-only 实验边界。
-- [Sparse / Linear Attention](#7-sparse--linear-attention改变可见图或核函数)：区分稀疏可见图和线性核技巧。
-- [MoE 与 Attention](#8-moe-与-attention-的关系)：理解注意力之外的条件计算、容量扩展和离散路由训练。
-- [面试复写线索](#9-面试复写线索)：把主线浓缩为可快速复写的实现不变量。
+- [技术发展路径](#技术发展路径)
+- [1. Scaled Dot-Product Attention](#1-scaled-dot-product-attention)
+- [2. MHA、MQA、GQA](#2-mhamqagqa)
+- [3. Transformer Encoder-Decoder 与 Decoder-Only](#3-transformer-encoder-decoder-与-decoder-only)
+- [4. 位置编码](#4-位置编码)
+- [5. MLA：从 KV cache 压缩到矩阵吸收](#5-mla从-kv-cache-压缩到矩阵吸收)
+- [6. FlashAttention：exact attention 的 IO 优化](#6-flashattentionexact-attention-的-io-优化)
+- [7. Sparse / Linear Attention：改变可见图或核函数](#7-sparse-linear-attention改变可见图或核函数)
+- [8. MoE 与 Attention 的关系](#8-moe-与-attention-的关系)
+- [9. 快速复写线索](#9-快速复写线索)
+- [10. 复杂度总表](#10-复杂度总表)
+- [11. 当前项目代码组织](#11-当前项目代码组织)
+- [12. 理解检查](#12-理解检查)
 
 ## 技术发展路径
 
-| 时间       | 技术                       | 主要出处                                                                                                                                                     | 本项目关注点                                                        |
-| ---------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| 2013-08-15 | Straight-Through estimator | [Bengio et al.](https://arxiv.org/abs/1308.3432)                                                                                                             | 为离散/随机神经元估计或传播梯度，包含 straight-through 思路         |
-| 2016-11-03 | Gumbel-Softmax             | [Categorical Reparameterization](https://arxiv.org/abs/1611.01144)                                                                                           | 用可微的 Gumbel-Softmax 分布近似 categorical sample                 |
-| 2016-11-02 | Concrete distribution      | [Concrete Distribution](https://arxiv.org/abs/1611.00712)                                                                                                    | categorical 离散变量的连续松弛                                      |
-| 2017-01-23 | Sparsely-Gated MoE         | [Outrageously Large Neural Networks](https://arxiv.org/abs/1701.06538)                                                                                       | 用条件计算扩大参数容量，每个样本只激活部分专家                      |
-| 2017-06-12 | Transformer / MHA          | [Attention Is All You Need](https://arxiv.org/abs/1706.03762)                                                                                                | Scaled dot-product attention、encoder-decoder、并行 self-attention  |
-| 2017-11-02 | VQ-VAE                     | [Neural Discrete Representation Learning](https://arxiv.org/abs/1711.00937)                                                                                  | 用向量量化离散 latent，并用 straight-through 让 encoder 可训练      |
-| 2018-06-11 | GPT-style decoder-only     | [Improving Language Understanding by Generative Pre-Training](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) | 只保留 causal decoder，用 next-token prediction 训练                |
-| 2019-11-06 | MQA                        | [Fast Transformer Decoding: One Write-Head is All You Need](https://arxiv.org/abs/1911.02150)                                                                | 所有 query head 共享一组 K/V，减少增量解码带宽                      |
-| 2020-04-10 | Longformer                 | [Longformer](https://arxiv.org/abs/2004.05150)                                                                                                               | 用局部窗口和全局 token 做长文档 sparse attention                    |
-| 2020-06-29 | Linear Transformer         | [Transformers are RNNs](https://arxiv.org/abs/2006.16236)                                                                                                    | 用核函数重写 attention，支持线性复杂度递推                          |
-| 2020-07-28 | BigBird                    | [BigBird](https://arxiv.org/abs/2007.14062)                                                                                                                  | 用局部、随机、全局边组合 sparse attention，并分析表达能力           |
-| 2020-09-30 | Performer                  | [Performer](https://arxiv.org/abs/2009.14794)                                                                                                                | 用 FAVOR+ 随机特征近似 softmax attention                            |
-| 2021-01-11 | Switch Transformer         | [Switch Transformer](https://arxiv.org/abs/2101.03961)                                                                                                       | 简化 MoE 路由，每个 token 选择一个专家                              |
-| 2021-04-20 | RoPE                       | [RoFormer](https://arxiv.org/abs/2104.09864)                                                                                                                 | 用旋转把绝对位置编码进 Q/K，并在点积里体现相对位置                  |
-| 2021-08-27 | ALiBi                      | [Train Short, Test Long](https://arxiv.org/abs/2108.12409)                                                                                                   | 不加位置 embedding，而是给 score 加线性距离惩罚                     |
-| 2022-05-27 | FlashAttention             | [FlashAttention](https://arxiv.org/abs/2205.14135)                                                                                                           | IO-aware exact attention，避免物化完整 attention matrix             |
-| 2023-05-22 | GQA                        | [GQA](https://arxiv.org/abs/2305.13245)                                                                                                                      | 在 MHA 和 MQA 之间折中 KV head 数量                                 |
-| 2023-06-27 | Position Interpolation     | [PI](https://arxiv.org/abs/2306.15595)                                                                                                                       | 将超长位置线性压回训练上下文范围，缓解 RoPE 外推                    |
-| 2023-07-17 | FlashAttention-2           | [FlashAttention-2](https://arxiv.org/abs/2307.08691)                                                                                                         | 改善 work partitioning，减少 non-matmul FLOPs 和 shared memory 通信 |
-| 2023-09-01 | YaRN                       | [YaRN](https://arxiv.org/abs/2309.00071)                                                                                                                     | 对 RoPE context extension 做更高效的频率缩放和微调策略              |
-| 2024-01-11 | DeepSeekMoE                | [DeepSeekMoE](https://arxiv.org/abs/2401.06066)                                                                                                              | 通过更细粒度专家与共享专家增强 MoE 专家分工                         |
-| 2024-02-21 | LongRoPE                   | [LongRoPE](https://arxiv.org/abs/2402.13753)                                                                                                                 | 面向百万级上下文的 RoPE 扩展与搜索策略                              |
-| 2024-05-07 | MLA                        | [DeepSeek-V2](https://arxiv.org/abs/2405.04434)                                                                                                              | 用 latent KV 压缩 cache，并配合矩阵吸收提升推理效率                 |
-| 2024-07-11 | FlashAttention-3           | [FlashAttention-3](https://arxiv.org/abs/2407.08608)                                                                                                         | 面向 Hopper GPU 的异步流水、warp specialization、FP8                |
-| 2024-12-27 | DeepSeek-V3                | [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437)                                                                                             | 继续使用 MLA，并在训练系统上扩展 FP8/MoE 等工程策略                 |
-| 2026-03-05 | FlashAttention-4           | [FlashAttention-4](https://arxiv.org/abs/2603.05451)                                                                                                         | 面向 Blackwell GPU 的算法与 kernel pipeline co-design               |
+| 时间       | 技术                       | 主要出处                                                                                                                                                     | 本项目关注点                                                                     |
+| ---------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| 2013-08-15 | Straight-Through estimator | [Bengio et al.](https://arxiv.org/abs/1308.3432)                                                                                                             | 为离散/随机神经元估计或传播梯度，包含 straight-through 思路                      |
+| 2015-02-11 | BatchNorm                  | [Batch Normalization](https://arxiv.org/abs/1502.03167)                                                                                                      | 按 batch 统计特征均值/方差，说明它和 token 内归一化的切分角度不同                |
+| 2016-07-21 | LayerNorm                  | [Layer Normalization](https://arxiv.org/abs/1607.06450)                                                                                                      | 按单个样本/Token 的 hidden 维统计，适合 Transformer 中的 token 表示              |
+| 2016-11-02 | Concrete distribution      | [Concrete Distribution](https://arxiv.org/abs/1611.00712)                                                                                                    | categorical 离散变量的连续松弛                                                   |
+| 2016-11-03 | Gumbel-Softmax             | [Categorical Reparameterization](https://arxiv.org/abs/1611.01144)                                                                                           | 用可微的 Gumbel-Softmax 分布近似 categorical sample                              |
+| 2017-01-23 | Sparsely-Gated MoE         | [Outrageously Large Neural Networks](https://arxiv.org/abs/1701.06538)                                                                                       | 用条件计算扩大参数容量，每个样本只激活部分专家                                   |
+| 2017-06-12 | Transformer / MHA          | [Attention Is All You Need](https://arxiv.org/abs/1706.03762)                                                                                                | Scaled dot-product attention、encoder-decoder、并行 self-attention               |
+| 2017-11-02 | VQ-VAE                     | [Neural Discrete Representation Learning](https://arxiv.org/abs/1711.00937)                                                                                  | 用向量量化离散 latent，并用 straight-through 让 encoder 可训练                   |
+| 2018-06-11 | GPT-style decoder-only     | [Improving Language Understanding by Generative Pre-Training](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) | 只保留 causal decoder，用 next-token prediction 训练                             |
+| 2019-10-16 | RMSNorm                    | [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)                                                                                     | 和 LayerNorm 一样按 token hidden 维统计，但去掉 centering，只保留 RMS re-scaling |
+| 2019-11-06 | MQA                        | [Fast Transformer Decoding: One Write-Head is All You Need](https://arxiv.org/abs/1911.02150)                                                                | 所有 query head 共享一组 K/V，减少增量解码带宽                                   |
+| 2020-04-10 | Longformer                 | [Longformer](https://arxiv.org/abs/2004.05150)                                                                                                               | 用局部窗口和全局 token 做长文档 sparse attention                                 |
+| 2020-06-29 | Linear Transformer         | [Transformers are RNNs](https://arxiv.org/abs/2006.16236)                                                                                                    | 用核函数重写 attention，支持线性复杂度递推                                       |
+| 2020-07-28 | BigBird                    | [BigBird](https://arxiv.org/abs/2007.14062)                                                                                                                  | 用局部、随机、全局边组合 sparse attention，并分析表达能力                        |
+| 2020-09-30 | Performer                  | [Performer](https://arxiv.org/abs/2009.14794)                                                                                                                | 用 FAVOR+ 随机特征近似 softmax attention                                         |
+| 2021-01-11 | Switch Transformer         | [Switch Transformer](https://arxiv.org/abs/2101.03961)                                                                                                       | 简化 MoE 路由，每个 token 选择一个专家                                           |
+| 2021-04-20 | RoPE                       | [RoFormer](https://arxiv.org/abs/2104.09864)                                                                                                                 | 用旋转把绝对位置编码进 Q/K，并在点积里体现相对位置                               |
+| 2021-08-27 | ALiBi                      | [Train Short, Test Long](https://arxiv.org/abs/2108.12409)                                                                                                   | 不加位置 embedding，而是给 score 加线性距离惩罚                                  |
+| 2022-05-27 | FlashAttention             | [FlashAttention](https://arxiv.org/abs/2205.14135)                                                                                                           | IO-aware exact attention，避免物化完整 attention matrix                          |
+| 2023-05-22 | GQA                        | [GQA](https://arxiv.org/abs/2305.13245)                                                                                                                      | 在 MHA 和 MQA 之间折中 KV head 数量                                              |
+| 2023-06-27 | Position Interpolation     | [PI](https://arxiv.org/abs/2306.15595)                                                                                                                       | 将超长位置线性压回训练上下文范围，缓解 RoPE 外推                                 |
+| 2023-07-17 | FlashAttention-2           | [FlashAttention-2](https://arxiv.org/abs/2307.08691)                                                                                                         | 改善 work partitioning，减少 non-matmul FLOPs 和 shared memory 通信              |
+| 2023-09-01 | YaRN                       | [YaRN](https://arxiv.org/abs/2309.00071)                                                                                                                     | 对 RoPE context extension 做更高效的频率缩放和微调策略                           |
+| 2024-01-11 | DeepSeekMoE                | [DeepSeekMoE](https://arxiv.org/abs/2401.06066)                                                                                                              | 通过更细粒度专家与共享专家增强 MoE 专家分工                                      |
+| 2024-02-21 | LongRoPE                   | [LongRoPE](https://arxiv.org/abs/2402.13753)                                                                                                                 | 面向百万级上下文的 RoPE 扩展与搜索策略                                           |
+| 2024-05-07 | MLA                        | [DeepSeek-V2](https://arxiv.org/abs/2405.04434)                                                                                                              | 用 latent KV 压缩 cache，并配合矩阵吸收提升推理效率                              |
+| 2024-07-11 | FlashAttention-3           | [FlashAttention-3](https://arxiv.org/abs/2407.08608)                                                                                                         | 面向 Hopper GPU 的异步流水、warp specialization、FP8                             |
+| 2024-12-27 | DeepSeek-V3                | [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437)                                                                                             | 继续使用 MLA，并在训练系统上扩展 FP8/MoE 等工程策略                              |
+| 2026-03-05 | FlashAttention-4           | [FlashAttention-4](https://arxiv.org/abs/2603.05451)                                                                                                         | 面向 Blackwell GPU 的算法与 kernel pipeline co-design                            |
 
 ## 1. Scaled Dot-Product Attention
 
@@ -93,7 +98,102 @@ $$
 - padding mask：batch 中 padding token 不应被 attention 到。
 - task-specific attention mask：用于屏蔽任意指定位置。
 
-为什么除以 $\sqrt{d_h}$：如果 $Q,K$ 每个维度方差近似为 1，点积的方差会随 $d_h$ 增大。softmax 对尺度敏感，未缩放时 logits 容易过大，使概率分布过早接近 one-hot，梯度也更不稳定。
+除以 $\sqrt{d_h}$ 的理由不能只说“防止 logits 太大”。更底层的问题是：未缩放的点积会让 softmax 很快进入饱和区，而 attention 里的 softmax 是内部路由，不像分类交叉熵那样总能直接得到 $p-y$ 形式的梯度。
+
+先看点积尺度。假设 $q_i,k_i$ 已经经过 LayerNorm 和近似保方差的线性投影，所以每个维度大致满足：
+
+$$
+\mathbb{E}[q_i]=\mathbb{E}[k_i]=0,\quad
+\mathrm{Var}(q_i)\approx\mathrm{Var}(k_i)\approx 1
+$$
+
+这不是说训练中每个 token 永远严格满足独立同分布，而是初始化和归一化设计希望把每个 head 维度放在相近量级上。若进一步把不同维度近似看作独立，则：
+
+$$
+s=q^\top k=\sum_{i=1}^{d_h}q_i k_i
+$$
+
+$$
+\mathbb{E}[q_i k_i]=0,\quad
+\mathrm{Var}(q_i k_i)=\mathbb{E}[q_i^2]\mathbb{E}[k_i^2]\approx 1
+$$
+
+因此：
+
+$$
+\mathrm{Var}(s)\approx d_h
+$$
+
+也就是说，head_dim 越大，未缩放 score 的典型幅度越大。除以 $\sqrt{d_h}$ 后：
+
+$$
+\mathrm{Var}\left(\frac{q^\top k}{\sqrt{d_h}}\right)\approx 1
+$$
+
+这一步的目标是让 softmax 输入在训练早期保持可用尺度，而不是让某几个偶然较大的点积直接支配整行 attention。
+
+再看 softmax 梯度。设：
+
+$$
+p_i=\frac{e^{z_i}}{\sum_j e^{z_j}}
+$$
+
+对任意 $i,j$：
+
+$$
+\frac{\partial p_i}{\partial z_j}
+=p_i(\delta_{ij}-p_j)
+$$
+
+写成矩阵就是：
+
+$$
+J_{\mathrm{softmax}}=\mathrm{diag}(p)-pp^\top
+$$
+
+主对角线元素是：
+
+$$
+J_{ii}=p_i(1-p_i)
+$$
+
+非主对角线元素是：
+
+$$
+J_{ij}=-p_i p_j,\quad i\ne j
+$$
+
+如果 logits 的最大值比其他位置大很多，softmax 会接近 one-hot。设赢家位置为 $c$，则 $p_c\approx 1$，其他 $p_j\approx 0$。这时：
+
+$$
+J_{cc}=p_c(1-p_c)\approx 0
+$$
+
+$$
+J_{jj}=p_j(1-p_j)\approx 0,\quad
+J_{ij}=-p_i p_j\approx 0
+$$
+
+整块 Jacobian 都接近 0。若 loss 对 attention 概率的梯度记为 $g_i=\partial L/\partial p_i$，则：
+
+$$
+\frac{\partial L}{\partial z_j}
+=\sum_i g_i\frac{\partial p_i}{\partial z_j}
+=p_j\left(g_j-\sum_i p_i g_i\right)
+$$
+
+当 $p$ 已经接近 one-hot，非赢家位置被 $p_j\approx 0$ 直接压掉；赢家位置又因为 $\sum_i p_i g_i\approx g_c$，也接近 0。于是模型很难通过微调 logits 改变 attention 分布。缩放项的作用就是把 score 方差从 $O(d_h)$ 拉回 $O(1)$，让 softmax 不至于在初始化或训练早期过早饱和。
+
+核心实现对应下面几行：
+
+```python
+scores = torch.matmul(q, k.transpose(-2, -1))
+scores = scores / math.sqrt(q.shape[-1])
+if attention_mask is not None:
+    scores = scores.masked_fill(attention_mask, float("-inf"))
+probs = torch.softmax(scores, dim=-1)
+out = torch.matmul(probs, v)
+```
 
 实现上最关键的 shape 是：
 
@@ -124,26 +224,41 @@ $$
 
 MQA/GQA 的 attention 公式没有变，变的是 K/V 投影输出的 head 数：
 
-| 类型 | Query heads |       KV heads | cache 每 token 元素数 | 直觉                                   |
-| ---- | ----------: | -------------: | --------------------: | -------------------------------------- |
-| MHA  |       $h_q$ |          $h_q$ |             $2h_qd_h$ | 每个 query head 有独立 K/V，表达最完整 |
-| GQA  |       $h_q$ | $1<h_{kv}<h_q$ |          $2h_{kv}d_h$ | 一组 K/V 服务一组 query heads          |
-| MQA  |       $h_q$ |            $1$ |                $2d_h$ | 所有 query heads 共享一组 K/V          |
+| 类型 | Query heads |             KV heads | cache 每 token 元素数 | 直觉                                   |
+| ---- | ----------: | -------------------: | --------------------: | -------------------------------------- |
+| MHA  |       $h_q$ |                $h_q$ |             $2h_qd_h$ | 每个 query head 有独立 K/V，表达最完整 |
+| GQA  |       $h_q$ | $1\lt h_{kv}\lt h_q$ |          $2h_{kv}d_h$ | 一组 K/V 服务一组 query heads          |
+| MQA  |       $h_q$ |                  $1$ |                $2d_h$ | 所有 query heads 共享一组 K/V          |
 
 注意这里的 cache 每 token 元素数只统计 K/V。训练时仍然要计算 $QK^\top$，所以 MQA/GQA 不会把 attention 的二次复杂度变成线性；它们主要降低自回归解码中的 KV cache 体积和读带宽。
 
 ### 2.2 `repeat_kv` 不应该污染 cache
 
-代码中最容易写错的一点是：GQA/MQA 的 K/V 在 cache 里应该保持紧凑，只在计算 attention score 前临时 repeat 到 query head 数。
+代码中最容易写错的一点是：GQA/MQA 的 K/V 在 cache 里应该保持紧凑，只在计算 attention score 前临时 repeat 到 query head 数。下面这个函数就是 `examples/attention_family.py` 里的核心：
 
 ```python
-k_for_attn = repeat_kv(k, num_q_heads // num_kv_heads)
-v_for_attn = repeat_kv(v, num_q_heads // num_kv_heads)
+def repeat_kv(hidden: torch.Tensor, repeats: int) -> torch.Tensor:
+    # hidden 是应该存进 KV cache 的紧凑形态：
+    #   (batch, seq_len, num_kv_heads, head_dim)
+    # repeat 后只用于本次 attention matmul：
+    #   (batch, seq_len, num_q_heads, head_dim)
+    if repeats == 1:
+        return hidden
+
+    batch, seq_len, num_kv_heads, head_dim = hidden.shape
+    hidden = hidden[:, :, :, None, :].expand(
+        batch, seq_len, num_kv_heads, repeats, head_dim
+    )
+    return hidden.reshape(batch, seq_len, num_kv_heads * repeats, head_dim)
+
+
+k_for_attn = repeat_kv(k_cache_compact, num_q_heads // num_kv_heads)
+v_for_attn = repeat_kv(v_cache_compact, num_q_heads // num_kv_heads)
 ```
 
 如果把 repeat 后的 K/V 存进 cache，就把 MQA/GQA 的推理收益抵消了。也就是说，`repeat_kv` 是矩阵乘法前的视图/广播逻辑，不是 cache 逻辑。
 
-### 2.3 为什么 GQA 是折中而不是折磨
+### 2.3 为什么 GQA 是折中方案
 
 MQA 最省 cache，但所有 query heads 只能共享同一套 K/V 表示；MHA 最自由，但 cache 最大。GQA 的价值是：让若干 query heads 共享一个 K/V head，保留一部分多样性，同时显著降低 cache。例如 `num_q_heads=32, num_kv_heads=8` 时，KV cache 是 MHA 的 1/4，但不是像 MQA 那样压到 1/32。
 
@@ -172,6 +287,18 @@ cross-attention: Q comes from decoder states, K/V come from encoder states
 
 GPT-style decoder-only 去掉 encoder 和 cross-attention，只保留 causal decoder stack。训练时输入整段序列，用 causal mask 保证第 $t$ 个位置只能看见 $\leq t$ 的 token。推理时如果每一步都重新计算整段 K/V，会重复做大量历史 token 投影。
 
+训练阶段没有 cache，`target_len == source_len`，普通上三角 mask 就够了：
+
+```python
+def causal_mask_for_training(seq_len: int, device: torch.device) -> torch.Tensor:
+    # True 表示要屏蔽的位置。diagonal=1 会屏蔽主对角线右上方，
+    # 所以第 i 个 token 可以看见 0..i，包括自己。
+    return torch.triu(
+        torch.ones(seq_len, seq_len, device=device, dtype=torch.bool),
+        diagonal=1,
+    )
+```
+
 增量解码的状态变化是：
 
 ```text
@@ -188,13 +315,94 @@ decode step t:
 
 这里 causal mask 的 diagonal 也要考虑 `past_len`。如果当前只输入 1 个 token，source length 是 `past_len + 1`，它可以看见所有历史和自己，不应该被普通上三角 mask 错误屏蔽。
 
+```python
+def causal_mask_with_cache(
+    target_len: int,
+    source_len: int,
+    past_len: int,
+    device: torch.device,
+) -> torch.Tensor:
+    # source_len = past_len + target_len。
+    # 如果 decode 时 target_len=1, source_len=past_len+1，
+    # diagonal=1 会错误屏蔽历史后面的列；diagonal=1+past_len
+    # 才表示“只屏蔽当前 query 之后的未来 key”。
+    return torch.triu(
+        torch.ones(target_len, source_len, device=device, dtype=torch.bool),
+        diagonal=1 + past_len,
+    )
+```
+
 对应实验：`examples/transformer_usage.py`。
 
 ## 4. 位置编码
 
-### 4.1 正弦绝对位置编码
+### 4.1 为什么需要位置：从顺序信息到多频率相位坐标
 
-原始 Transformer 使用固定正弦位置编码：
+如果 self-attention 不加入任何位置信息，输入序列被整体重排后，输出也会以同样方式重排。也就是说，模型能看到 token 内容，却没有一个独立信号告诉它“这个 token 在第几个位置”。对双向 encoder 来说，这会直接丢失顺序；对 causal decoder 来说，mask 虽然规定了可见范围，但模型仍然需要知道距离、局部邻近关系和绝对/相对顺序。
+
+位置编码的目标不是让“每个频率维度都能单独区分所有位置”。单个三角频率一定会周期性重复，它只能提供一个相位坐标。真正有用的是一组不同频率共同形成多尺度坐标：
+
+$$
+\theta_i(m)=m\omega_i
+$$
+
+其中 $m$ 是 token 位置，$\omega_i$ 是第 $i$ 个频率的角速度。对应周期是：
+
+$$
+T_i=\frac{2\pi}{\omega_i}
+$$
+
+第 $i$ 个频率上的位置坐标是：
+
+$$
+(\sin\theta_i(m),\cos\theta_i(m))
+$$
+
+固定某个频率 $i$ 时，位置差 $\Delta=m-n$ 对应相位差：
+
+$$
+\Delta\theta_i=\Delta\omega_i
+$$
+
+如果 $\Delta\theta_i$ 接近 $2\pi$ 的整数倍，这个频率看起来就像“绕了一圈又回到原处”。这里说的“周期性混叠/别名”是借用信号处理里的 aliasing 直觉：单个周期函数无法单独区分相差一个或多个周期的位置；它不是 Transformer 论文里单独定义的专有术语。如果 $\omega_i$ 很小，那么短距离上的 $\Delta\theta_i$ 也很小，这个频率对局部位置变化不敏感。
+
+因此三角位置编码需要高频和低频同时存在：
+
+- 高频维度：$\omega_i$ 大、周期 $T_i$ 短，局部位置变化会产生明显相位差，适合分辨近邻顺序；问题是很快绕圈，单看这个频率时，长距离上容易出现周期性混叠。
+- 低频维度：$\omega_i$ 小、周期 $T_i$ 长，长距离内不容易绕回，适合提供更慢变化的全局坐标；问题是短距离变化很小，局部分辨率弱。
+- 多频率组合：不要求每个频率都唯一标识位置，而是让不同频率在不同尺度上互补。一个位置最终由所有频率上的相位组合表示。
+
+对应到代码，频率和周期可以直接从 `inv_freq` 看出来：
+
+```python
+inv_freq = base ** (-torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+periods = 2 * math.pi / inv_freq
+angles = positions[:, None] * inv_freq[None, :]
+```
+
+`inv_freq[0]` 最大，旋转最快；越往后频率越低，周期越长。理解这一点后，再看“上下文扩展”和“外推”，问题就会变成：训练时模型见过哪些相位组合，推理时新的上下文长度会把哪些频率推到训练没覆盖的区域。
+
+`base` 控制这组频率覆盖的尺度范围。原始 Transformer 的正弦位置编码使用：
+
+$$
+\omega_i=base^{-2i/d}
+$$
+
+当 $i=0$ 时，$\omega_0=1$，周期是 $2\pi$ 个 token；当 $i$ 接近 $d/2$ 时，$\omega_i$ 接近 $1/base$，周期接近 $2\pi\cdot base$。所以 `base=10000` 大致让周期从几个 token 跨到几万 token，形成按对数间隔排列的多尺度相位坐标。
+
+原版 Transformer base 模型使用 $d_{model}=512$，big 模型使用 $d_{model}=1024$；位置编码维度和 $d_{model}$ 相同。以 $d_{model}=512$ 为例，偶奇维组成 256 个 sin/cos 频率对，周期大致从 $2\pi$ token 到 $10000\cdot 2\pi$ token。若改成 $d_{model}=1024$，频率范围基本不变，但频率对变成 512 个，对数频率网格更密。
+
+这和原论文里的任务长度不是同一个量级。Transformer 论文做的是机器翻译，训练样本是句子对；论文提到 batch 里约有 25000 个 source tokens 和 25000 个 target tokens，但这不是单条序列的 context window。也就是说，最慢频率接近 $1/10000$、周期接近 $6.28\times 10^4$ token，远大于当时句子级翻译样本的典型长度。它不是为了让低频在训练长度里覆盖多个周期，而是把最低频做成很慢变化的全局坐标。
+
+Transformer 选择固定正弦/余弦编码的出发点有两个：第一，不引入额外可学习参数；第二，论文作者希望它有机会外推到训练时没见过的序列长度。这里的外推直觉来自三角函数加法公式：固定偏移 $k$ 时，$PE(m+k)$ 可以由 $PE(m)$ 通过同频率下的线性变换表示，因为 $\sin(\theta+k\omega)$ 和 $\cos(\theta+k\omega)$ 都能写成 $\sin\theta,\cos\theta$ 的线性组合。
+
+这里不要把设计目标理解成“每个频率在目标长度内都不能重复”。高频本来就会重复，它负责局部分辨；低频通常不需要在训练长度内覆盖多个周期，反而常常作为慢变化的全局坐标。如果最低频在训练长度内绕了很多圈，它也会失去长距离锚点作用。更合理的直觉是：给定一个预期上下文长度 $L$，希望最快频率能看清局部变化，最慢频率的周期和 $L$ 同量级或更大，中间频率按几何级数填满尺度空隙。
+
+因此 `base` 不是严格从 $L$ 推导出的唯一答案，而是一个控制频率范围的超参数。`base` 太小，所有频率都偏快，长距离上更容易整体绕圈；`base` 太大，很多低频维度在训练长度内几乎不动，局部分辨贡献很弱。改变 $d_{model}$ 则主要改变频率采样密度：维度越大，中间尺度越密，模型更容易组合出不同距离尺度上的位置特征；维度越小，频率网格更稀疏，相邻尺度之间的空档更大。原始 Transformer 的 `10000` 可以理解为一个经验尺度选择，后来的 RoPE scaling、Position Interpolation、YaRN、LongRoPE 本质上都在重新分配“位置长度”和“频率尺度”之间的关系。
+
+### 4.2 正弦绝对位置编码：把多频率坐标加到输入
+
+把上一节的频率定义代入 `base=10000`，原始 Transformer 使用固定正弦位置编码：
 
 $$
 PE(pos,2i)=\sin(pos/10000^{2i/d})
@@ -206,7 +414,83 @@ $$
 
 它被加到 token embedding 上，因此位置信息进入后续所有线性层。它的优点是简单、不增加参数；缺点是位置是“混入输入表示”的，后续层很难显式控制位置如何影响 QK 点积。
 
-### 4.2 RoPE 的核心：位置进入 QK 点积
+核心实现就是先构造几何频率，再把偶数维填成 sin、奇数维填成 cos：
+
+```python
+def sinusoidal_positions(seq_len: int, dim: int, base: float = 10000.0):
+    positions = torch.arange(seq_len, dtype=torch.float32)[:, None]
+    inv_freq = base ** (-torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+    angles = positions * inv_freq[None, :]
+
+    table = torch.zeros(seq_len, dim)
+    table[:, 0::2] = torch.sin(angles)
+    table[:, 1::2] = torch.cos(angles)
+    return table
+
+
+x = token_embedding + sinusoidal_positions(seq_len, d_model)
+```
+
+### 4.3 正弦绝对位置编码的外推问题
+
+正弦位置编码有一个容易被误解的点：公式可以计算任意位置，不等于模型自然具备可靠的长上下文外推能力。沿用前面的频率定义：
+
+$$
+\omega_i=10000^{-2i/d}
+$$
+
+则绝对位置编码的角度是：
+
+$$
+\theta_i(m)=m\omega_i
+$$
+
+位置向量由 $\sin\theta_i(m)$ 和 $\cos\theta_i(m)$ 组成。数学上 $m$ 可以继续增大，但训练时模型只见过 $0\le m\lt L$ 的相位组合。外推时的具体问题分两类：
+
+- 高频维度在训练长度内可能已经绕过很多圈，继续增加上下文会带来更多周期性重复；同一个频率上，相距一个周期的两个位置会非常相似。
+- 低频维度在训练长度内可能只走过很短一段弧，模型学到的是这一段局部变化；推理时如果进入更远位置，它会看到训练中没覆盖过的新相位区域。
+
+更关键的是，绝对位置编码先加到输入：
+
+$$
+\tilde{x}_m=e_m+PE(m)
+$$
+
+再进入 Q/K 投影。单层 attention score 中位置项会混在：
+
+$$
+s_{mn}=(e_m+PE(m))W_QW_K^\top(e_n+PE(n))^\top
+$$
+
+展开后包含：
+
+$$
+e_m A e_n^\top
++e_m A PE(n)^\top
++PE(m)A e_n^\top
++PE(m)A PE(n)^\top,\quad A=W_QW_K^\top
+$$
+
+这里没有天然保证 score 只依赖 $n-m$。模型可以学到某些绝对位置相位组合和任务模式的关联；当推理长度超过训练长度，新的 $PE(m)$ 虽然仍然有界，但它和内容项、投影矩阵 $A$ 的组合没有在训练中被约束过。问题不在“公式算不出来”，而在“模型没有学过如何解释这些相位组合”。
+
+这不等于“正弦绝对位置编码完全没有相对位置信息”。在纯位置向量之间，三角函数本身确实包含相对位移结构：
+
+$$
+PE(m)PE(n)^\top
+=\sum_i \cos((m-n)\omega_i)
+$$
+
+并且固定偏移 $k$ 时，$PE(m+k)$ 可以由 $PE(m)$ 在线性空间中表示。因此模型理论上可以从绝对位置编码中推导相对关系。区别在于：这种相对关系是隐式可学习/可利用的，不是像 RoPE 那样直接把 $R_{n-m}$ 放进 QK 点积，也不是像 ALiBi 那样直接给 score 加一个只依赖距离的 bias。
+
+从这个公式看，正弦绝对位置编码的扩展思路大致有三类：
+
+- 改角度映射：把 $\theta_i(m)=m\omega_i$ 改成 $\theta_i(f(m))=f(m)\omega_i$，或重新选择 $\omega_i$，让目标长度内的位置落到更合适的相位范围。但因为 $PE(m)$ 已经进入所有后续投影和 FFN 表示，这类修改通常需要继续训练或微调来适配。
+- 改位置进入模型的位置：不用把绝对位置直接加进输入，而改成 RoPE 这类只作用在 Q/K 的机制，或 ALiBi 这类直接作用在 score 上的机制，让外推问题更集中地出现在 attention score。
+- 改训练分布：直接在更长上下文上训练或微调，让模型见过新的绝对位置组合。
+
+### 4.4 RoPE 的核心：位置进入 QK 点积
+
+参考：https://zhuanlan.zhihu.com/p/647109286
 
 RoPE 对 Q/K 的二维子空间做旋转。对一对维度 $(x_1,x_2)$：
 
@@ -226,7 +510,7 @@ x_2
 \end{bmatrix}
 $$
 
-其中 $m$ 是位置。关键不是“旋转看起来高级”，而是两个旋转向量点积时：
+其中 $m$ 是位置。关键点在两个旋转向量点积时：
 
 $$
 (R_m q)^\top(R_n k)=q^\top R_{n-m}k
@@ -234,7 +518,15 @@ $$
 
 点积自然依赖相对位移 $n-m$。这就是“RoPE 用绝对位置旋转 Q/K，却在 score 中体现相对位置”的核心。
 
-### 4.3 多实现视角：公式等价和布局等价是两件事
+和正弦绝对位置编码相比，RoPE 的位置不再先污染整个 hidden state，而是只在 Q/K 点积前进入：
+
+$$
+s_{mn}=(R_m q_m)^\top(R_n k_n)=q_m^\top R_{n-m}k_n
+$$
+
+因此 RoPE 的长上下文问题更集中：训练长度 $L$ 限制了模型见过的相对距离 $\lvert n-m\rvert$ 和相对旋转 $R_{n-m}$；扩展上下文时，主要要处理的是位置到旋转角度的映射，而不是所有层如何解释一个新的输入位置向量。
+
+### 4.5 多实现视角：公式等价和布局等价是两件事
 
 原始代码里保留了多个 RoPE 实现版本，这一点很有价值。整理后可以这样理解：
 
@@ -255,10 +547,58 @@ split-half 需要先整理成：
 [x0, x2, ..., x1, x3, ...]
 ```
 
-然后再用 `rotate_half`。这正是 `examples/positional_encoding.py`
-里保留多实现对照的原因。
+然后再用 `rotate_half`。
 
-### 4.4 ALiBi 的位置观
+把几个实现压缩到核心代码，就是下面这组对照：
+
+```python
+def apply_rope_interleaved_pair(x, cos, sin):
+    # interleaved layout: (x0, x1), (x2, x3), ...
+    x_even = x[..., 0::2]
+    x_odd = x[..., 1::2]
+    out = torch.empty_like(x)
+    out[..., 0::2] = x_even * cos - x_odd * sin
+    out[..., 1::2] = x_even * sin + x_odd * cos
+    return out
+
+
+def rotate_every_pair_interleaved(x):
+    # [x0, x1, x2, x3] -> [-x1, x0, -x3, x2]
+    pairs = x.view(*x.shape[:-1], x.shape[-1] // 2, 2)
+    rotated = torch.stack([-pairs[..., 1], pairs[..., 0]], dim=-1)
+    return rotated.reshape_as(x)
+
+
+def apply_rope_interleaved_vector(x, cos, sin):
+    # 和直接公式相同，只是写成 x*cos + rotate(x)*sin。
+    cos_full = cos.repeat_interleave(2, dim=-1)
+    sin_full = sin.repeat_interleave(2, dim=-1)
+    return x * cos_full + rotate_every_pair_interleaved(x) * sin_full
+
+
+def apply_rope_interleaved_complex(x, cos, sin):
+    # 把 (x0, x1) 看作复数 x0 + i*x1，再乘以 e^{i theta}。
+    x_complex = torch.view_as_complex(
+        x.float().reshape(*x.shape[:-1], -1, 2).contiguous()
+    )
+    phase = torch.complex(cos.float(), sin.float())
+    return torch.view_as_real(x_complex * phase).flatten(-2).to(x.dtype)
+
+
+def rotate_half(x):
+    # split-half layout: [x_left, x_right] -> [-x_right, x_left]
+    x_left, x_right = x.chunk(2, dim=-1)
+    return torch.cat([-x_right, x_left], dim=-1)
+
+
+def apply_rope_split_half(x, cos, sin):
+    # 这个写法要求输入已经是 [x0, x2, ..., x1, x3, ...] 的布局。
+    return x * cos + rotate_half(x) * sin
+```
+
+`apply_rope_interleaved_pair`、`apply_rope_interleaved_vector`、`apply_rope_interleaved_complex` 的数学旋转对都是相邻维度；`apply_rope_split_half` 的旋转对跨越前后半维。把 split-half 代码直接喂 interleaved tensor，输出不同是预期现象。
+
+### 4.6 ALiBi 的位置观
 
 ALiBi 不把位置向量加到 embedding，也不旋转 Q/K，而是直接给 attention score 加距离惩罚：
 
@@ -270,22 +610,90 @@ $$
 
 对应实验：`examples/positional_encoding.py`。
 
-### 4.5 长上下文位置扩展：外推不是免费午餐
+### 4.7 长上下文位置扩展：角度映射和外推边界
 
-RoPE 的优势是相对位置性质强，但长上下文会遇到一个直观问题：如果训练时只见过长度 $L$，推理时直接把位置推到远大于 $L$，旋转角度会进入训练中没见过的相位区域。长上下文位置扩展的核心就是重新设计“位置 $\rightarrow$ 角度”的映射。
+RoPE 的每个旋转维度都有一个频率：
+
+$$
+\omega_i=10000^{-2i/d}
+$$
+
+位置 $m$ 到角度的原始映射是：
+
+$$
+\theta_i(m)=m\omega_i
+$$
+
+两个位置 $m,n$ 在第 $i$ 个旋转维度上的相对相位差是：
+
+$$
+\theta_i(n)-\theta_i(m)=(n-m)\omega_i
+$$
+
+这解释了 RoPE 的两个性质。第一，attention score 能看到相对位移，因为点积里出现的是 $n-m$。第二，长上下文外推会出问题：如果训练上下文长度是 $L$，模型主要在 $\lvert n-m\rvert\lt L$ 对应的相对相位组合上学习；推理长度变成 $L'\gg L$ 时，直接使用 $\theta_i(m)=m\omega_i$ 会引入训练中没有覆盖过的更大距离和相位组合。
+
+Position Interpolation 改的是 RoPE 的位置函数 $f(m)$：
+
+$$
+\theta_i^{PI}(m)=f(m)\omega_i,\quad
+f(m)=m\frac{L}{L'}
+$$
+
+这样 $m=L'$ 附近的位置会被压回训练长度 $L$ 附近的角度范围。代价也直接从公式里看得出来：真实距离 $\Delta=m-n$ 会变成：
+
+$$
+\Delta'=\Delta\frac{L}{L'}
+$$
+
+如果 $L'=8L$，长上下文里的 8 个 token 间隔在 RoPE 角度里只相当于训练时的 1 个 token 间隔。它减少了训练外相位，但也压缩了局部分辨率。
+
+YaRN / LongRoPE 这类方法会进一步避免所有频率统一乘 $L/L'$。更抽象地写，可以让每个频率维度使用自己的缩放：
+
+$$
+\theta_i^{scaled}(m)=m\alpha_i\omega_i
+$$
+
+其中 $\alpha_i$ 可以随频率维度变化，也可以区分短上下文区域和长上下文区域。这样做的目的不是改变 attention 公式，而是在“短距离分辨率”和“长距离相位不越界”之间做更细的分配。
+
+这些 $\alpha_i$ 通常不是把一组可学习参数丢进模型、靠普通反向传播从零学出来。更常见的做法是：
+
+- YaRN：根据目标扩展倍数、频率波长和若干超参数构造一个分段/平滑 ramp。短波长、高频维度更偏向插值缩放，长波长、低频维度更多保留原始外推；再配合少量继续训练让模型适应新的相位分布。
+- LongRoPE：把不同维度、不同位置范围的缩放因子作为搜索对象，用搜索得到的非均匀缩放策略兼顾短上下文保真和长上下文扩展；搜索后仍通常需要继续训练或微调。
+
+所以 PI 是“所有频率共享一个缩放因子”，YaRN / LongRoPE 则是“缩放因子随频率、位置区域或搜索策略变化”。这就是它们能更细地分配短距离分辨率和长距离相位范围的原因。
+
+对应核心代码如下：
+
+```python
+def rope_inv_freq(dim: int, base: float = 10000.0):
+    return base ** (-torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+
+
+def rope_angles(positions: torch.Tensor, inv_freq: torch.Tensor):
+    # 原始 RoPE: theta_i(m) = m * omega_i
+    return positions.float()[:, None] * inv_freq[None, :]
+
+
+def position_interpolation_positions(positions, train_context, target_context):
+    # f(m) = m * L / L'
+    return positions.float() * (train_context / target_context)
+
+
+def scaled_rope_angles(positions, inv_freq, per_frequency_scale):
+    # YaRN / LongRoPE 类方法可以理解为给不同频率不同 alpha_i。
+    return positions.float()[:, None] * (inv_freq * per_frequency_scale)[None, :]
+```
 
 最容易混淆的几个方向：
 
 - 直接外推：不改 RoPE，位置继续增长。实现简单，但高频维度相位可能快速转到训练外区域。
 - Position Interpolation：把新上下文位置线性压缩回训练上下文范围。例如训练长度 $L$、目标长度 $L'$，位置 $m$ 使用 $m\cdot L/L'$。
-- YaRN 类方法：不是所有频率都用同一个缩放，通常会对不同频率维度做分段或平滑缩放，并配合少量微调。
-- LongRoPE 类方法：把短上下文保真和长上下文扩展作为联合目标，搜索或设计更细粒度的位置缩放策略。
+- YaRN 类方法：不是所有频率都用同一个缩放，而是按频率波长和扩展倍数构造分段/平滑缩放，并配合少量微调。
+- LongRoPE 类方法：把短上下文保真和长上下文扩展作为联合目标，通过搜索得到更细粒度的位置缩放策略。
 
 这几类方法都在改 RoPE 的位置映射，而不是改 attention 的 Q/K/V head 组织，也不是 FlashAttention 那种 IO 优化。它们通常可以和 GQA、MLA、FlashAttention 同时出现。
 
-对应实验：`examples/long_context_position.py`。它展示了原始 RoPE、Position
-Interpolation、YaRN-like 频率缩放在相同位置上的角度变化。这个实验不是复现完整论文训练
-recipe，而是把“为什么长上下文要改角度映射”这件事跑出来。
+对应实验：`examples/long_context_position.py`。它展示了原始 RoPE、Position Interpolation、YaRN-like 频率缩放在相同位置上的角度变化。实验目标是把“为什么长上下文要改角度映射”这件事跑出来，而不是复现完整论文训练 recipe。
 
 ## 5. MLA：从 KV cache 压缩到矩阵吸收
 
@@ -293,14 +701,16 @@ recipe，而是把“为什么长上下文要改角度映射”这件事跑出�
 
 MLA 的目标不是把 attention matrix 低秩近似掉，而是让 K/V 的生成经过一个低维 latent cache。以 DeepSeek-V2 风格记号表示：
 
-Query 路径：
+先固定本节的符号约定：MLA 小节采用更贴近 PyTorch 的 row-vector 写法，hidden state 和 latent 都看成行向量，线性投影写成 $hW$。很多论文会用 column-vector 写成 $Wh$，两者互为转置。前面 RoPE 基础推导里写出的 $R_{n-m}$ 对应 column-vector 方向；本节把旋转矩阵放在右侧时会得到 $R_{m-n}$。相对距离符号反过来不是机制差异，只是矩阵放置方向不同。
+
+设 $a$ 表示 attention head 下标，$H$ 表示 head 数。Query 路径：
 
 $$
 c_t^Q = \mathrm{RMSNorm}(h_t W^{DQ})
 $$
 
 $$
-q_t^C=c_t^QW^{UQ},\quad q_t^R=c_t^QW^{QR}
+q_{t,a}^C=c_t^QW_a^{UQ},\quad \bar{q}_{t,a}^R=c_t^QW_a^{QR}
 $$
 
 KV 路径：
@@ -310,20 +720,54 @@ c_t^{KV}=\mathrm{RMSNorm}(h_tW^{DKV})
 $$
 
 $$
-k_t^C=c_t^{KV}W^{UK},\quad v_t^C=c_t^{KV}W^{UV}
+k_{t,a}^C=c_t^{KV}W_a^{UK},\quad v_{t,a}=c_t^{KV}W_a^{UV}
 $$
 
-同时还有一条共享的 RoPE key：
+同时还有一条共享的 RoPE key 路径。横线表示还没有做位置旋转：
 
 $$
-k_t^R=h_tW^{KR}
+\bar{k}_t^R=h_tW^{KR}
+$$
+
+它没有 head 下标。也就是说，$q^R$ 是每个 head 一份，$k^R$ 是所有 heads 共享一份；计算时可以临时 broadcast，但 cache 中不保存 $H$ 份。RoPE 旋转后：
+
+$$
+q_{t,a}^R=\bar{q}_{t,a}^RR_t,\quad k_t^R=\bar{k}_t^RR_t
+$$
+
+核心 shape 可以按下面理解：
+
+$$
+q^C:(B,T,H,d_{nope}),\quad q^R:(B,T,H,d_{rope})
+$$
+
+$$
+k^C:(B,T,H,d_{nope}),\quad v:(B,T,H,d_v),\quad k^R:(B,T,d_{rope})
 $$
 
 attention score 拆成内容部分和位置部分：
 
 $$
-score = (q^C(k^C)^\top + q^R(k^R)^\top) / \sqrt{d_q}
+score_{m,n,a}
+=
+\frac{q_{m,a}^C(k_{n,a}^C)^\top + q_{m,a}^R(k_n^R)^\top}
+{\sqrt{d_{nope}+d_{rope}}}
 $$
+
+对应到代码，关键点是 `k_rope` 的原始 shape 没有 head 维度，只有算位置 score 时才加一个单例 head 维度让它广播：
+
+```python
+# q_rope: (batch, seq_len, num_heads, d_rope)
+# k_rope: (batch, seq_len, d_rope), shared by all heads
+q_rope = apply_rope(q_rope, cos, sin)
+k_rope = apply_rope(k_rope[:, :, None, :], cos, sin)  # (B, T, 1, d_rope)
+
+# matmul broadcasts the singleton key-head dimension from 1 to num_heads.
+score_rope = torch.matmul(
+    q_rope.transpose(1, 2),                 # (B, H, T, d_rope)
+    k_rope.transpose(1, 2).transpose(-2, -1) # (B, 1, d_rope, T)
+)
+```
 
 普通 MHA 每个 token cache 约为：
 
@@ -337,17 +781,146 @@ $$
 128(128+128)=32768
 $$
 
-MLA cache 只保存：
+MLA cache 只保存 compressed KV 和一条共享 RoPE key：
 
 $$
-c^{KV} + k^R = 512+64=576
+d_c + d_{rope}=512+64=576
 $$
 
-比例约为 56.9x。这个数字的意义不是“attention 计算少了 56.9x”，而是每个历史 token 要从 cache 里读出的 K/V 表示大幅减少了。
+比例约为 56.9x。这个数字成立的前提就是 $k^R$ 不按 head 复制；如果把它误写成 $(B,T,H,d_{rope})$ 的 cache，MLA 的缓存优势会被错误估计。这个数字的意义不是“attention 计算少了 56.9x”，而是每个历史 token 要从 cache 里读出的 K/V 表示大幅减少了。
 
-### 5.2 内容路径的矩阵吸收
+### 5.2 RMSNorm：和 LayerNorm 同轴，但去掉 centering
 
-内容 attention 展开为：
+MLA 公式里有两处 RMSNorm：
+
+$$
+c_t^Q = \mathrm{RMSNorm}(h_t W^{DQ}),\quad
+c_t^{KV}=\mathrm{RMSNorm}(h_tW^{DKV})
+$$
+
+它不是 MLA 压缩 cache 的核心技巧，但它会影响后续 latent 的尺度。理解 RMSNorm 前，先把常见 normalization 的“统计轴”分清楚。
+
+设 Transformer hidden states 为：
+
+$$
+X\in\mathbb{R}^{B\times T\times d}
+$$
+
+BatchNorm 通常对每个 hidden feature 单独统计 batch 维和时间/空间维：
+
+$$
+\mu_j=\frac{1}{BT}\sum_{b,t}X_{b,t,j},\quad
+\sigma_j^2=\frac{1}{BT}\sum_{b,t}(X_{b,t,j}-\mu_j)^2
+$$
+
+也就是说，同一个 batch 里不同样本、不同 token 位置会互相影响统计量。这个切分角度在 CNN 里常见，但对自回归 Transformer 不自然：当前 token 的归一化不应该依赖 future token，也不应该强依赖同 batch 里其他样本。
+
+LayerNorm 换了统计轴。它对每个 token 独立地沿 hidden 维统计：
+
+$$
+\mu=\frac{1}{d}\mathbf{1}^{\top}x,\quad
+\sigma=\sqrt{\frac{1}{d}\|x-\mu\mathbf{1}\|_2^2+\epsilon}
+$$
+
+$$
+\mathrm{LayerNorm}(x)=\gamma\odot\frac{x-\mu\mathbf{1}}{\sigma}+\beta
+$$
+
+RMSNorm 和 LayerNorm 的切分角度一致：也是对单个 token 的 hidden 维做归一化。它删掉了减均值，只保留 root-mean-square 缩放：
+
+$$
+r=\sqrt{\frac{1}{d}\|x\|_2^2+\epsilon}
+$$
+
+$$
+\mathrm{RMSNorm}(x)=g\odot\frac{x}{r}
+$$
+
+对应最小实现就是：
+
+```python
+class RMSNorm(nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(dim))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 每个 token 独立沿 hidden 维计算 RMS，不混合 batch 或时间位置。
+        rms = torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return self.weight * x * rms
+```
+
+这不是简单地“少算一个均值”而已。对不含 affine 的核心归一化 $y=x/r$，其 Jacobian 是：
+
+$$
+\frac{\partial y}{\partial x}
+=
+\frac{1}{r}I-\frac{1}{d r^3}xx^\top
+$$
+
+如果上游梯度是 $g=\partial L/\partial y$，则：
+
+$$
+\frac{\partial L}{\partial x}
+=
+\frac{g}{r}
+-
+\frac{x}{d r^3}(x^\top g)
+$$
+
+这个式子说明了 RMSNorm 的梯度流：和 $x$ 正交的梯度分量大致被 $1/r$ 缩放；沿着 $x$ 的径向分量会被第二项抵消。若忽略 $\epsilon$，有：
+
+$$
+\left(\frac{\partial y}{\partial x}\right)x=0
+$$
+
+这对应尺度不变性：$x$ 整体乘一个正数时，$x/r$ 不变，所以沿“整体放大/缩小”的方向不会改变输出。
+
+LayerNorm 的 Jacobian 可以写成：
+
+$$
+\tilde{x}=x-\mu\mathbf{1},\quad
+P=I-\frac{1}{d}\mathbf{1}\mathbf{1}^{\top}
+$$
+
+$$
+\frac{\partial\,\mathrm{LN}(x)}{\partial x}
+=
+\frac{P}{\sigma}
+-
+\frac{1}{d\sigma^3}\tilde{x}\tilde{x}^{\top}
+$$
+
+这里 $P$ 是 centering 投影矩阵，所以：
+
+$$
+P\mathbf{1}=0
+$$
+
+这意味着 LayerNorm 对整体平移方向也不敏感：$x$ 加上 $c\mathbf{1}$，中心化后的 $\tilde{x}$ 不变。RMSNorm 没有这个投影：
+
+$$
+\left(\frac{\partial y}{\partial x}\right)\mathbf{1}
+=
+\frac{\mathbf{1}}{r}-\frac{x(x^\top\mathbf{1})}{d r^3}
+$$
+
+一般不等于 0。换句话说，RMSNorm 保留了 hidden 向量的均值/偏置方向对输出的影响，只消除整体尺度波动；LayerNorm 同时消除整体尺度和整体平移方向。RMSNorm 论文把这概括为：保留 re-scaling invariance，去掉 re-centering invariance。
+
+这也解释了它在 MLA 里的位置。$hW^{DQ}$ 和 $hW^{DKV}$ 被压到低维 latent 后，后续 score 会包含：
+
+$$
+(c^QW^{UQ})(c^{KV}W^{UK})^\top
+$$
+
+如果 $c^Q$ 或 $c^{KV}$ 的范数随 token 大幅波动，score 尺度也会波动。RMSNorm 先把 latent 的 RMS 拉到稳定范围，再交给后续投影。它本身不能被吸收到固定矩阵里，因为 $1/r(x)$ 依赖当前 token 输入；但吸收发生在 RMSNorm 之后的线性矩阵之间，所以两者不冲突。
+
+对应实验：`examples/norm_comparison.py`。它打印 BatchNorm/LayerNorm/RMSNorm 的统计轴差异，并验证 RMSNorm Jacobian 的解析式和 autograd 一致。
+
+### 5.3 内容路径的矩阵吸收
+
+下面先固定某个 attention head，省略 head 下标。内容 attention 展开为：
 
 $$
 (c^QW^{UQ})(c^{KV}W^{UK})^\top
@@ -388,18 +961,76 @@ $$
 - 展开版：显式恢复 $k^C,v$，逻辑最直观，适合训练和理解。
 - 吸收版：不显式恢复 $k^C,v$，更接近推理优化思路，适合验证矩阵结合律。
 
-### 5.3 为什么 RoPE 不能直接并进同一个吸收矩阵
+### 5.4 为什么 RoPE 不能直接并进同一个吸收矩阵
 
-RoPE 路径是：
+内容路径能吸收，是因为中间矩阵不依赖 token 位置。对 query 位置 $m$、key 位置 $n$：
 
 $$
-q^R_m = R_m(c^QW^{QR}),\quad k^R_n = R_n(h_nW^{KR})
+score^C_{mn}
+=(c_m^QW^{UQ})(c_n^{KV}W^{UK})^\top
 $$
 
-这里至少有两层障碍：
+可以改写为：
 
-1. $R_m,R_n$ 随位置变化，不是固定权重矩阵。矩阵吸收依赖固定线性层之间的结合律，而位置旋转会让“同一个权重”在不同 token 位置表现不同。
-2. $k^R$ 来自 $hW^{KR}$ 的共享位置 key 路径，不是从 $c^{KV}$ 通过 $W^{UK}$ 恢复出来的内容 key。换句话说，MLA 有意把 content cache 和 positional key 分开保存。
+$$
+score^C_{mn}
+=c_m^Q\left(W^{UQ}(W^{UK})^\top\right)(c_n^{KV})^\top
+$$
+
+中间的：
+
+$$
+W^{QK}=W^{UQ}(W^{UK})^\top
+$$
+
+是固定矩阵，和 $m,n$ 无关，所以可以被预先吸收。
+
+RoPE 路径多了位置旋转。为了和 5.1 的 row-vector 约定保持一致，下面把旋转矩阵放在右侧，并先写出真实 MLA 中的共享 key 路径：
+
+$$
+q^R_{m,a}=(c_m^QW_a^{QR})R_m,\quad k^R_n=(h_nW^{KR})R_n
+$$
+
+先忽略 MLA 真实实现中 $k^R$ 来自 $h_nW^{KR}$ 而不是 $c_n^{KV}$，假设我们想把它也写成某个 latent key 路径：
+
+$$
+q^R_{m,a}=(c_m^QW^Q_{R,a})R_m,\quad k^R_{n,a}=(c_n^{KV}W^K_{R,a})R_n
+$$
+
+那么 RoPE score 是：
+
+$$
+score^R_{mn,a}
+=(c_m^QW^Q_{R,a})R_mR_n^\top(W^K_{R,a})^\top(c_n^{KV})^\top
+$$
+
+利用旋转矩阵正交性，$R_mR_n^\top$ 只由相对位置决定。记：
+
+$$
+R_mR_n^\top=R_{m-n}
+$$
+
+于是：
+
+$$
+score^R_{mn,a}
+=c_m^Q\left(W^Q_{R,a} R_{m-n}(W^K_{R,a})^\top\right)(c_n^{KV})^\top
+$$
+
+问题就在括号里的中间矩阵：
+
+$$
+W^Q_{R,a} R_{m-n}(W^K_{R,a})^\top
+$$
+
+它依赖相对位置 $m-n$。内容路径只有一个固定 $W^{QK}$；RoPE 路径则每一种相对距离都对应一个不同的中间矩阵。要把它“吸收”为一个固定矩阵，就必须让同一个 $W^{QK}$ 同时等于所有 $W^Q_{R,a} R_{m-n}(W^K_{R,a})^\top$，这在非退化情况下不成立。若改用 column-vector 写法，中间会出现 $R_{n-m}$，但它仍然依赖相对位置，不能吸收为一个与 $m,n$ 无关的固定矩阵。
+
+这也解释了实现上的边界：RoPE 可以通过“按位置旋转 query、按位置旋转 key”保持可分计算，但不能像内容路径那样把两个投影矩阵合成一个与位置无关的权重矩阵，然后直接在 latent cache 上做一次固定点积。
+
+回到 MLA 的真实路径，还有第二层障碍：
+
+- $k^R$ 来自 $hW^{KR}$ 的共享位置 key 路径，没有 head 下标，不是从 $c^{KV}$ 通过 $W^{UK}$ 恢复出来的内容 key。
+- MLA cache 有意保存 $c^{KV}$ 和 $k^R$ 两部分：前者服务内容吸收，后者服务 RoPE 位置 score。
 
 因此 MLA 可以吸收内容部分的 $W^{UQ},W^{UK},W^{UV},W^O$，但仍需要单独处理 RoPE key。这个点如果不拆开，很容易误以为“既然 K/V 都压缩了，RoPE K 也能一起压缩到同一个 latent 里”。
 
@@ -469,8 +1100,7 @@ FlashAttention-2 不只是换了 for 循环，它还减少 non-matmul FLOPs、�
 - v1 更像“每来一个 K/V block，都把某个 Q block 的归一化输出更新并写回”。
 - v2 更像“固定一个 Q block，把所有 K/V block 扫完，最后只除一次 $l$ 并写回一次 $O$”。
 
-本项目的 `examples/flash_attention.py` 保留了这种差异，并打印
-`output block writes`。在 `seq_len=64, block=16` 的例子里，v1 写 16 次，v2 写 4 次。
+本项目的 `examples/flash_attention.py` 保留了这种差异，并打印 `output block writes`。在 `seq_len=64, block=16` 的例子里，v1 写 16 次，v2 写 4 次。
 
 ### 6.4 CPU-only 环境应该展示什么
 
@@ -549,9 +1179,7 @@ $$
 
 Performer 用 FAVOR+ 随机特征近似 softmax attention；Linear Transformer 使用 kernel trick 让 attention 可以像 RNN 一样递推。代价是：这不再是普通 dense softmax attention 的精确结果，质量、稳定性和长距离选择能力都取决于核函数和特征设计。
 
-对应实验：`examples/sparse_linear_attention.py`。它展示 sliding-window sparse attention
-的可见边数量变化，以及一个确定性 feature map 的 causal linear attention。实验中
-sparse/linear 输出和 dense 输出有差异，这是预期现象，因为机制被改变了。
+对应实验：`examples/sparse_linear_attention.py`。它展示 sliding-window sparse attention 的可见边数量变化，以及一个确定性 feature map 的 causal linear attention。实验中 sparse/linear 输出和 dense 输出有差异，这是预期现象，因为机制被改变了。
 
 ## 8. MoE 与 Attention 的关系
 
@@ -596,9 +1224,7 @@ MoE 的工程难点包括：
 - 分布式通信：专家并行会引入 all-to-all 通信，吞吐瓶颈可能不在矩阵乘法本身。
 - 专家分工：共享专家、细粒度专家、路由正则都会影响专家是否真正专业化。
 
-对应实验：`examples/moe_attention.py`。它保留 dense causal attention，然后把 FFN 换成
-top-1 MoE，并打印每个专家收到的 token 数量。这个实验的重点是看清楚：attention 负责跨
-token 混合，MoE 负责每个 token 后续走哪个 FFN 专家。
+对应实验：`examples/moe_attention.py`。它保留 dense causal attention，然后把 FFN 换成 top-1 MoE，并打印每个专家收到的 token 数量。这个实验的重点是看清楚：attention 负责跨 token 混合，MoE 负责每个 token 后续走哪个 FFN 专家。
 
 ### 8.1 Top-k 路由的不可导问题
 
@@ -755,14 +1381,11 @@ $$
 
 这和 MoE top-k routing 的共同点是：前向有离散选择，训练需要替代梯度路径。不同点是：VQ-VAE 的离散对象是 latent code，MoE 的离散对象是专家路由。
 
-对应实验：`examples/discrete_gradient_estimators.py`。它展示
-`logsumexp≈max`、softargmax、recursive soft top-k、soft F1 surrogate、hard argmax
-无梯度，softmax relaxation、Gumbel-Softmax hard sample、straight-through argmax 都能让
-router logits 获得梯度，并用 VQ-VAE codebook lookup 展示 encoder/codebook 的梯度路径。
+对应实验：`examples/discrete_gradient_estimators.py`。它展示 `logsumexp≈max`、softargmax、recursive soft top-k、soft F1 surrogate、hard argmax 无梯度，softmax relaxation、Gumbel-Softmax hard sample、straight-through argmax 都能让 router logits 获得梯度，并用 VQ-VAE codebook lookup 展示 encoder/codebook 的梯度路径。
 
-## 9. 面试复写线索
+## 9. 快速复写线索
 
-如果要在面试中快速复写，应优先抓住这些不变量：
+快速复写时，优先抓住这些不变量：
 
 - MHA/MQA/GQA：写一个通用 attention，参数是 `num_q_heads` 和 `num_kv_heads`，检查 `num_q_heads % num_kv_heads == 0`，cache 存未 repeat 的 K/V。
 - Decoder-only cache：prefill 阶段输入整段 prompt；decode 阶段输入一个 token，K/V concat 到 cache，causal mask 要考虑 `past_len`。
@@ -791,17 +1414,18 @@ router logits 获得梯度，并用 VQ-VAE codebook lookup 展示 encoder/codebo
 
 ## 11. 当前项目代码组织
 
-本教程对应的本地实验代码包括：
+本教程对应的代码都在 `examples/`：
 
-- `attention_family.py`：MHA/MQA/GQA 统一实现。
-- `transformer_usage.py`：encoder-decoder、decoder-only、KV cache 调用方式。
-- `positional_encoding.py`：sinusoidal、RoPE 多实现、ALiBi。
-- `long_context_position.py`：RoPE 长上下文位置缩放实验。
-- `mla.py`：MLA 展开版与矩阵吸收版。
-- `flash_attention.py`：FlashAttention v1/v2 CPU 仿真。
-- `sparse_linear_attention.py`：Sparse/Linear Attention 机制对照。
-- `moe_attention.py`：Attention 后接 MoE-FFN 的路由实验。
-- `discrete_gradient_estimators.py`：MoE/VQ-VAE 中离散选择的替代梯度路径。
+- `examples/attention_family.py`：MHA/MQA/GQA 统一实现。
+- `examples/transformer_usage.py`：encoder-decoder、decoder-only、KV cache 调用方式。
+- `examples/positional_encoding.py`：sinusoidal、RoPE 多实现、ALiBi。
+- `examples/long_context_position.py`：RoPE 长上下文位置缩放实验。
+- `examples/norm_comparison.py`：BatchNorm、LayerNorm、RMSNorm 的统计轴和 Jacobian 对照。
+- `examples/mla.py`：MLA 展开版与矩阵吸收版。
+- `examples/flash_attention.py`：FlashAttention v1/v2 CPU 仿真。
+- `examples/sparse_linear_attention.py`：Sparse/Linear Attention 机制对照。
+- `examples/moe_attention.py`：Attention 后接 MoE-FFN 的路由实验。
+- `examples/discrete_gradient_estimators.py`：MoE/VQ-VAE 中离散选择的替代梯度路径。
 
 ## 12. 理解检查
 

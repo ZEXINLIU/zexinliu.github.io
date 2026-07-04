@@ -84,11 +84,11 @@ ninja.data = [{
             window.location.href = "/blog/2026/distributed-learning-tutorial/";
           
         },
-      },{id: "post-modern-attention-for-llms-mha-mqa-gqa-rope-mla-flashattention-and-moe",
+      },{id: "post-modern-attention-for-llms-kv-cache-rope-mla-flashattention-sparse-linear-attention-and-moe",
         
-          title: "Modern Attention for LLMs: MHA/MQA/GQA, RoPE, MLA, FlashAttention, and MoE",
+          title: "Modern Attention for LLMs: KV Cache, RoPE, MLA, FlashAttention, Sparse/Linear Attention, and MoE...",
         
-        description: "从 MHA/MQA/GQA、RoPE、MLA 到 FlashAttention、MoE 的注意力机制笔记。",
+        description: "从 Q/K/V 调用接口、MHA/MQA/GQA 与 KV cache 出发，梳理 RoPE/ALiBi/RMSNorm、MLA matrix absorption、FlashAttention online softmax、Sparse/Linear Attention、MoE routing 和 discrete gradient estimators。",
         section: "Posts",
         handler: () => {
           

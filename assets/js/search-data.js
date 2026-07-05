@@ -62,11 +62,11 @@ ninja.data = [{
             window.location.href = "/blog/2026/modern-reinforcement-learning-objectives/";
           
         },
-      },{id: "post-inside-nano-vllm-scheduler-paged-kv-cache-prefill-decode-and-sampling",
+      },{id: "post-from-nano-vllm-to-vllm-scheduler-paged-kv-cache-prefill-decode-tensor-parallelism-and-sampling",
         
-          title: "Inside nano-vLLM: Scheduler, Paged KV Cache, Prefill/Decode, and Sampling",
+          title: "From nano-vLLM to vLLM: Scheduler, Paged KV Cache, Prefill/Decode, Tensor Parallelism, and Sampling...",
         
-        description: "沿请求生命周期拆解 scheduler、paged KV cache、prefill/decode、prefix cache 和采样。",
+        description: "沿请求生命周期拆解 LLMEngine、Scheduler、BlockManager、paged KV cache、prefill/decode、prefix cache、preemption、Tensor Parallel 与 sampling，理解 nano-vLLM 如何抽象 vLLM-style inference pipeline。",
         section: "Posts",
         handler: () => {
           

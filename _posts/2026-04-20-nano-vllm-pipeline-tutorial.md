@@ -1,8 +1,8 @@
 ---
 layout: post
-title: "Inside nano-vLLM: Scheduler, Paged KV Cache, Prefill/Decode, and Sampling"
+title: "From nano-vLLM to vLLM: Scheduler, Paged KV Cache, Prefill/Decode, Tensor Parallelism, and Sampling"
 date: 2026-04-20 00:00:00
-description: 沿请求生命周期拆解 scheduler、paged KV cache、prefill/decode、prefix cache 和采样。
+description: 沿请求生命周期拆解 LLMEngine、Scheduler、BlockManager、paged KV cache、prefill/decode、prefix cache、preemption、Tensor Parallel 与 sampling，理解 nano-vLLM 如何抽象 vLLM-style inference pipeline。
 tags: vllm inference large-language-models ai-infra
 categories: ai-infra
 _styles: |
@@ -17,18 +17,14 @@ _styles: |
 
 <a id="top"></a>
 
-nano-vllm 的价值在于把 vLLM 风格推理引擎压缩到一个足够小、但仍能跑通关键闭环的代码面。沿着一个 batch 的 prompt 追下去，可以看到请求调度、KV cache 分配、模型 forward、采样和后处理并不是五个孤立模块，而是围绕“下一轮还能不能继续写入和读取 KV”这件事互相约束。
+本文的重点如下：
 
-这条主线里最值得抓住的是：
-
-- **Continuous batching 的本质是每步重新做资源选择**：`waiting` 和 `running` 不是静态 batch，而是 scheduler 每轮根据 token budget、KV block 是否足够、是否还有 prefill 请求来重新组批。
-- **Paged KV cache 把“逻辑上下文”和“物理显存块”拆开**：`Sequence.block_table` 是理解整套系统的关键，它让释放、复用、prefix cache 和 attention 访问都围绕 block id 运转。
-- **chunked prefill、prefix cache、preemption 是同一个资源问题的三种处理方式**：长 prompt 占用 token budget，KV block 是稀缺显存资源，调度器必须在继续算、复用旧 KV、释放请求之间选择。
-- **warmup 把冷启动成本前置成容量估算的一部分**：nano-vllm 先用模拟 prefill 暴露峰值显存，再用这个峰值决定可分配多少 KV blocks，因此 warmup 直接影响后续 scheduler 的资源上限。
-- **prefill/decode 的差别不只是 batch shape 不同**：prefill 负责把 prompt KV 写入 cache 并采样第一个 completion token；decode 每轮只输入上一个采样 token，却要通过 `block_tables` 读完整历史 KV。
-- **Tensor Parallel 是模型内部的数据布局约束**：QKV、MLP、embedding、LM head 的切分方式决定了哪些地方保留局部分片，哪些地方必须 all-reduce 或 gather。
-
-本文以 `nano-vllm/` 中的官方源码为正确性基准；历史手写分析文件中的有效注释和小例子已经压缩进主教程与 `examples/`，后续不再把根目录同名草稿作为材料入口。
+- **先把 nano-vllm 的闭环跑通**：从 prompt 进入 `LLMEngine.generate()` 开始，按 `Scheduler -> BlockManager -> ModelRunner -> Attention -> Sampler -> postprocess` 的顺序拆清楚每个模块如何协作。
+- **把 KV cache 作为贯穿全文的主线**：continuous batching、chunked prefill、paged KV cache、prefix cache、preemption 本质上都在回答同一个问题：下一轮还能不能继续写入、读取和复用 KV。
+- **区分 prefill 和 decode 的真实差异**：prefill 可能一次处理多个 prompt tokens 并写入一段 KV；decode 每轮只输入上一个采样 token，却必须通过 `block_tables` 读取完整历史上下文。
+- **解释推理引擎的容量预估和冷启动**：warmup 不是孤立的初始化步骤，它会暴露模型执行峰值显存，并影响后续可分配的 KV blocks 数量。
+- **把 Tensor Parallel 放回模型执行链路里理解**：QKV、MLP、embedding、LM head 的切分方式决定哪些地方保留局部分片，哪些地方需要 all-reduce 或 gather。
+- **最后再对照生产 vLLM**：nano-vllm 保留了最核心的抽象，生产 vLLM 在调度策略、PagedAttention backend、prefix cache 策略、模型生态和服务化能力上继续扩展。
 
 ## 目录
 
@@ -49,8 +45,8 @@ nano-vllm 的价值在于把 vLLM 风格推理引擎压缩到一个足够小、�
 - [15. 一条请求的端到端时间线](#timeline)
 - [16. Tensor Parallel：模型内部如何分片执行](#tensor-parallel)
 - [17. 采样策略：temperature 与 exponential race](#sampling)
-- [18. nano-vllm 与生产 vLLM 的关系](#nanovllm-vs-vllm)
-- [19. 理解检查与表达线索](#check)
+- [18. 从 nano-vllm 过渡到生产 vLLM](#nanovllm-vs-vllm)
+- [19. 关键机制压缩总结](#core-summary)
 
 <a id="mental-model"></a>
 
@@ -103,7 +99,7 @@ LLMEngine.generate
 | `nano-vllm/nanovllm/models/qwen3.py`         | 模型结构                   | embedding、decoder layers、attention、MLP、lm head    |
 | `nano-vllm/nanovllm/layers/sampler.py`       | 采样                       | 根据 logits 和 temperature 采样下一个 token           |
 
-Tensor Parallel 相关内容主要在 `nano-vllm/nanovllm/layers/linear.py` 和 `nano-vllm/nanovllm/layers/embed_head.py`。本文把它放在 [第 16 节](#tensor-parallel)，CPU 仿真代码对应 `examples/tensor_cpu_sim.py`。
+Tensor Parallel 相关内容主要在 `nano-vllm/nanovllm/layers/linear.py` 和 `nano-vllm/nanovllm/layers/embed_head.py`。本文把它放在 [第 16 节](#tensor-parallel)，CPU 仿真代码见 `examples/tensor_cpu_sim.py`。
 
 [回到目录](#top)
 
@@ -1175,7 +1171,7 @@ num_new_blocks -= 1
 - 当前仍被其他 running sequence 引用的完整 blocks。
 - 已经释放到 free 队列、但还没有被 `_allocate_block()` 覆盖的完整 blocks。
 
-CPU 小实验对应 `examples/prefix_cache_cpu_sim.py`。它模拟了三件事：
+CPU 小实验在 `examples/prefix_cache_cpu_sim.py`。它模拟了三件事：
 
 ```text
 1. S1 刚 allocate 但还没 postprocess 时，S2 相同 prefix 不能命中。
@@ -1366,7 +1362,7 @@ embedding/head 按 vocab 维度切分。
 - `nano-vllm/nanovllm/layers/embed_head.py`
 - `nano-vllm/nanovllm/models/qwen3.py`
 
-CPU 数值实验对应 `examples/tensor_cpu_sim.py`，用 Python list 模拟多个 rank，验证局部分片经过 concat 或 sum 后与 full linear 等价。
+CPU 数值实验在 `examples/tensor_cpu_sim.py`，用 Python list 模拟多个 rank，验证局部分片经过 concat 或 sum 后与 full linear 等价。
 
 ### 16.1 ColumnParallelLinear：切输出维度
 
@@ -1515,7 +1511,7 @@ VocabParallelEmbedding / ParallelLMHead: reduced or gathered result == full op
 
 ## 17. 采样策略：temperature 与 exponential race
 
-采样发生在 `ModelRunner.run()` 的最后：
+采样发生在 `ModelRunner.run()` 的最后。模型先输出 logits，rank0 再根据每条 sequence 的 temperature 采样下一个 token：
 
 ```python
 temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
@@ -1523,7 +1519,7 @@ logits = self.run_model(input_ids, positions, is_prefill)
 token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
 ```
 
-nano-vllm 只实现了 temperature sampling，没有实现 top-k、top-p、repetition penalty、beam search 等策略。`SamplingParams` 中也只有：
+nano-vllm 只实现了 temperature sampling，没有实现 top-k、top-p、repetition penalty、beam search 等策略。`SamplingParams` 里和采样直接相关的是：
 
 ```python
 temperature: float = 1.0
@@ -1537,21 +1533,43 @@ ignore_eos: bool = False
 assert self.temperature > 1e-10, "greedy sampling is not permitted"
 ```
 
-也就是说，这份实现刻意不走 greedy path；每次采样都通过概率分布产生 token。
+所以这份实现不走 greedy path；每次都从 temperature softmax 得到的 categorical distribution 中采样。
 
-### 17.1 temperature 如何改变分布
+### 17.1 从 logits 到概率分布
 
-源码中先做：
+设 vocab size 为 $V$，模型对某条 sequence 输出 logits：
+
+$$
+z = (z_1, z_2, \ldots, z_V)
+$$
+
+temperature 采样先把 logits 除以 $T$：
+
+$$
+\tilde{z}_i = \frac{z_i}{T}
+$$
+
+再做 softmax：
+
+$$
+p_i =
+\frac{\exp(z_i / T)}
+{\sum_{j=1}^{V}\exp(z_j / T)}
+$$
+
+源码对应两行：
 
 ```python
 logits = logits.float().div_(temperatures.unsqueeze(dim=1))
 probs = torch.softmax(logits, dim=-1)
 ```
 
-公式是：
+逐项对照：
 
 ```text
-p_i = exp(logit_i / T) / sum_j exp(logit_j / T)
+logits.float()                     -> 把 logits 转成 fp32，避免低精度下 softmax 更容易出数值问题
+div_(temperatures.unsqueeze(dim=1)) -> 每条 sequence 使用自己的 T，广播到 vocab 维度
+torch.softmax(logits, dim=-1)       -> 沿 vocab 维度得到 p_i
 ```
 
 `T` 越小，最大的 logit 会被进一步放大，分布更尖；`T` 越大，不同 token 之间的差距被压平，分布更平。举一个固定 logits：
@@ -1570,9 +1588,72 @@ T = 2.0: 低分 token 获得更多概率
 
 更准确地说，temperature 改变的是 logits 差距进入 softmax 前的尺度；“温度越高越随机”只是这个尺度变化的外在表现。
 
-### 17.2 exponential race 为什么等价于按 probs 抽样
+### 17.2 从 argmax 到按概率采样
 
-`Sampler.forward()` 没有直接调用 `torch.multinomial`，而是：
+拿到概率分布 $p = (p_1, \ldots, p_V)$ 之后，最简单的选择方式是 greedy / argmax：
+
+$$
+x = \operatorname*{argmax}_i p_i
+$$
+
+由于 softmax 是单调变换，在固定 temperature 下也等价于：
+
+$$
+x = \operatorname*{argmax}_i z_i
+$$
+
+这种方式稳定、确定，但它会把整个分布压成一个最高概率 token。只要 logits 不变，同一个位置永远选同一个 token；概率第二、第三高的 token 即使有不小概率，也完全不会被选中。生成任务通常需要保留一定多样性，所以更自然的目标是：不是永远选最大概率 token，而是让 token $i$ 被选中的概率等于 $p_i$。
+
+这就是 categorical sampling：
+
+$$
+X \sim \mathrm{Categorical}(p_1, \ldots, p_V)
+$$
+
+含义是：
+
+$$
+\Pr(X=i) = p_i
+$$
+
+`torch.multinomial(probs, num_samples=1)` 做的就是这类按离散概率分布抽样。严格说，multinomial distribution 描述的是多次抽样后的计数；当只抽 1 次时，它和 categorical distribution 等价。在语言模型采样语境里，说 multinomial sampling 通常就是指“按 probs 抽 token id”。
+
+### 17.3 朴素 categorical sampling：累计概率
+
+最容易理解的 categorical sampling 是 inverse CDF sampling：
+
+先计算累计概率：
+
+$$
+C_i = \sum_{j=1}^{i} p_j
+$$
+
+再采样一个均匀随机数：
+
+$$
+u \sim \mathrm{Uniform}(0, 1)
+$$
+
+最后返回第一个满足 $C_i \ge u$ 的 token：
+
+$$
+X = \min \{ i \mid C_i \ge u \}
+$$
+
+例如：
+
+```text
+probs = [0.1, 0.2, 0.7]
+cum   = [0.1, 0.3, 1.0]
+```
+
+如果 $u=0.25$，会选 token 2；如果 $u=0.82$，会选 token 3。这个方法直接表达了“按概率区间抽样”的直觉。
+
+nano-vllm 没有用这种累计概率写法，而是用了 exponential race。两者目标一样：都要实现 $\Pr(X=i)=p_i$。
+
+### 17.4 nano-vllm 的 exponential race 写法
+
+`Sampler.forward()` 的采样核心是：
 
 ```python
 sample_tokens = probs.div_(
@@ -1580,31 +1661,208 @@ sample_tokens = probs.div_(
 ).argmax(dim=-1)
 ```
 
-也就是对每个 token 采样一个独立随机变量：
+先看更直观的目标形式。我们想让每个 token 都得到一个随机“等待时间”：
 
 ```text
-E_i ~ Exp(1)
-score_i = p_i / E_i
-token = argmax_i score_i
+等待时间越短，越先被选中；
+p_i 越大，等待时间越倾向于更短。
 ```
 
-这个过程可以理解为 exponential race。等价形式是：
+如果能构造出：
+
+$$
+W_i \sim \mathrm{Exp}(p_i)
+$$
+
+也就是 rate 为 $p_i$ 的指数随机变量，那么选择最短等待时间：
+
+$$
+X = \operatorname*{argmin}_i W_i
+$$
+
+就能得到 categorical sampling。原因如下。
+
+nano-vllm 没有直接采样 $\mathrm{Exp}(p_i)$，而是先对每个 token 采样一个标准指数随机变量：
+
+$$
+E_i \sim \mathrm{Exp}(1)
+$$
+
+再用概率 $p_i$ 去缩放它：
+
+$$
+W_i = \frac{E_i}{p_i}
+$$
+
+这一步的直觉是：$p_i$ 越大，$E_i / p_i$ 越容易变小，token 越容易先到达终点。源码实际写的是倒数形式：
+
+$$
+X = \operatorname*{argmax}_i \frac{p_i}{E_i}
+=
+\operatorname*{argmin}_i \frac{E_i}{p_i}
+$$
+
+所以从概念上看，关注 `argmin E_i / p_i` 更直接；源码写成 `argmax p_i / E_i` 只是等价实现，因为取倒数会反转大小关系。
+
+源码里的 `clamp_min_(1e-10)` 只是避免 $E_i$ 极接近 0 时出现除零或异常大值：
+
+```python
+torch.empty_like(probs).exponential_(1).clamp_min_(1e-10)
+```
+
+为什么 $E_i / p_i$ 会变成 rate 为 $p_i$ 的指数分布？用 survival function 可以直接看出来。若 $E_i \sim \mathrm{Exp}(1)$，则：
+
+$$
+\Pr(E_i > t) = e^{-t}
+$$
+
+对 $W_i = E_i / p_i$，有：
+
+$$
+\Pr(W_i > t)
+=
+\Pr\left(\frac{E_i}{p_i} > t\right)
+=
+\Pr(E_i > p_i t)
+=
+e^{-p_i t}
+$$
+
+这正是 rate 为 $p_i$ 的指数分布：
+
+$$
+W_i \sim \mathrm{Exp}(p_i)
+$$
+
+现在看指数分布竞赛的性质。设所有 $W_i$ 独立，且：
+
+$$
+W_i \sim \mathrm{Exp}(p_i)
+$$
+
+那么第 $i$ 个等待时间最短的概率是：
+
+$$
+\Pr(W_i = \min_j W_j)
+=
+\frac{p_i}{\sum_j p_j}
+=
+p_i
+$$
+
+因为 softmax 后 $\sum_j p_j = 1$。所以：
+
+$$
+\operatorname*{argmin}_i \frac{E_i}{p_i}
+$$
+
+选中第 $i$ 个 token 的概率正好是 $p_i$。这说明 nano-vllm 虽然没有直接调用 `torch.multinomial(probs)`，但语义仍然是 categorical sampling。
+
+### 17.5 Gumbel-max 视角：从概率回到 logits
+
+同一个采样过程也可以用 Gumbel-max trick 理解。先从 nano-vllm 的实现形式出发：
+
+$$
+\operatorname*{argmax}_i \frac{p_i}{E_i}
+=
+\operatorname*{argmax}_i \left(\log p_i - \log E_i\right)
+$$
+
+当 $E_i \sim \mathrm{Exp}(1)$ 时，定义：
+
+$$
+G_i = -\log E_i \sim \mathrm{Gumbel}(0, 1)
+$$
+
+于是：
+
+$$
+X =
+\operatorname*{argmax}_i \left(\log p_i + G_i\right)
+$$
+
+这说明 `probs / Exp(1)` 和 `log(probs) + Gumbel noise` 是同一个采样过程的两种写法。
+
+进一步看，$p_i$ 本身来自 temperature softmax。设：
+
+$$
+a_i = \frac{z_i}{T}
+$$
+
+则：
+
+$$
+p_i =
+\frac{\exp(a_i)}
+{\sum_j \exp(a_j)}
+$$
+
+两边取 log：
+
+$$
+\log p_i
+=
+a_i
+-
+\log \sum_j \exp(a_j)
+$$
+
+也就是：
+
+$$
+\log p_i
+=
+\frac{z_i}{T}
+-
+\log \sum_j \exp(z_j/T)
+$$
+
+最后一项对所有 token 都相同，做 `argmax` 时不会改变最大值的位置。因此：
+
+$$
+\operatorname*{argmax}_i \left(\frac{z_i}{T} + G_i\right)
+=
+\operatorname*{argmax}_i \left(\log p_i + G_i\right)
+$$
+
+等价链条可以写成：
 
 ```text
 argmax_i p_i / E_i
-= argmax_i log(p_i) - log(E_i)
+= argmax_i (log p_i - log E_i)
+= argmax_i (log p_i + G_i)
+= argmax_i (z_i / T + G_i)
 ```
 
-而 `-log(E_i)` 服从 Gumbel 分布，所以它也等价于 Gumbel-max trick：
+所以 Gumbel-max 可以直接作用在 temperature logits 上，不必显式计算 softmax 后再取 log。nano-vllm 当前源码选择的是 `probs / Exp(1)` 路径；显式 Gumbel-max 实现则通常会写成 `argmax(z / T + gumbel_noise)`。两者采样到 token $i$ 的概率都是 $p_i$。
 
-```text
-token = argmax_i (log p_i + G_i)
-G_i ~ Gumbel(0, 1)
+### 17.6 源码实现逐行对照
+
+`Sampler.forward()` 完整逻辑很短：
+
+```python
+logits = logits.float().div_(temperatures.unsqueeze(dim=1))
+probs = torch.softmax(logits, dim=-1)
+sample_tokens = probs.div_(
+    torch.empty_like(probs).exponential_(1).clamp_min_(1e-10)
+).argmax(dim=-1)
+return sample_tokens
 ```
 
-这个技巧的结果是：第 `i` 个 token 被选中的概率正好是 `p_i`。所以源码虽然没有写 `multinomial`，但语义仍然是从 softmax 分布中采样。
+对应关系是：
 
-### 17.3 为什么只在 rank0 采样
+| 源码                                  | 数学含义                                             |
+| ------------------------------------- | ---------------------------------------------------- |
+| `logits.float()`                      | 使用 fp32 logits 做采样计算                          |
+| `div_(temperatures.unsqueeze(dim=1))` | $\tilde{z}_i = z_i / T$                              |
+| `softmax(..., dim=-1)`                | $p_i = \exp(\tilde{z}_i) / \sum_j \exp(\tilde{z}_j)$ |
+| `exponential_(1)`                     | 为每个 token 采样 $E_i \sim \mathrm{Exp}(1)$         |
+| `probs.div_(noise)`                   | 计算 $p_i / E_i$                                     |
+| `argmax(dim=-1)`                      | 选择 categorical sample                              |
+
+注意这里的 `probs.div_(...)` 是 in-place 操作。采样后 `probs` 本身不再保留原始概率，但后续也不会再用它。
+
+### 17.7 为什么只在 rank0 采样
 
 TP 场景下，前面的模型计算可能分布在多个 rank 上，但采样只在 rank0 执行：
 
@@ -1616,9 +1874,9 @@ token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else N
 
 这是因为 `ParallelLMHead` 会把 vocab-parallel logits gather 到 rank0。采样需要看到完整 vocab 分布；如果每个 rank 只拿自己的一段 vocab logits 独立采样，就无法得到全局 softmax 的正确结果。
 
-### 17.4 数值小实验
+### 17.8 数值小实验
 
-CPU 小实验对应 `examples/sampling_cpu_sim.py`。它做两件事：
+CPU 小实验在 `examples/sampling_cpu_sim.py`。它做两件事：
 
 ```text
 1. 对同一组 logits 分别用 T=0.5、1.0、2.0 采样，观察经验分布如何靠近 softmax 目标分布。
@@ -1637,62 +1895,112 @@ python examples/sampling_cpu_sim.py
 
 <a id="nanovllm-vs-vllm"></a>
 
-## 18. nano-vllm 与生产 vLLM 的关系
+## 18. 从 nano-vllm 过渡到生产 vLLM
 
-nano-vllm 适合用来学习 vLLM 的核心概念，但不能等同于生产 vLLM。
+前面的 1-17 节只围绕 nano-vllm 展开：请求如何进入 `LLMEngine`，如何被 `Scheduler` 组批，如何通过 `BlockManager` 分配 KV blocks，如何在 `ModelRunner` 和 `Attention` 中写入/读取 KV，最后如何采样、后处理和释放资源。这个顺序适合先把一个最小引擎的闭环拆清楚，再看生产 vLLM 在同类问题上扩展了哪些工程能力。
 
-相同主线：
+nano-vllm 和生产 vLLM 的共同主线是：
 
-- 都区分 prefill 和 decode。
-- 都围绕 continuous batching 做请求级动态调度。
-- 都用 paged KV cache / block table 思想管理 KV。
-- 都需要 attention kernel 根据 block table 访问历史 KV。
-- 都需要在有限 KV cache 下处理抢占、释放和复用。
+- 都把推理拆成 prefill 和 decode 两种计算形态。
+- 都需要在请求动态到达、长度不同、完成时间不同的情况下持续重组 batch。
+- 都把 KV cache 当成核心受限资源，用 block table / paged KV cache 管理历史上下文。
+- 都需要 attention kernel 根据 block table 找到非连续物理 KV blocks。
+- 都需要在 token budget、KV block 预算、吞吐和延迟之间做调度取舍。
 
-nano-vllm 的简化：
+两者的差异可以按实现层次看：
 
-- scheduler 策略更简单，prefill 优先，公平性和复杂优先级较少。
-- chunked prefill 只实现了简化策略。
-- KV cache manager 没有生产 vLLM 那么多策略和后端。
-- 模型、采样参数、量化、LoRA、speculative decoding、服务接口等能力都更少。
-- 错误处理、可观测性、性能优化、分布式部署都不是重点。
+| 层次            | nano-vllm                                                       | 生产 vLLM                                                                                       |
+| --------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 请求调度        | `waiting/running` 两队列，prefill 优先，decode 每轮推进 1 token | 调度策略更完整，需要处理优先级、公平性、prefill/decode 混排、抢占代价、长上下文和多租户服务压力 |
+| Chunked prefill | 只允许本轮第一个 sequence 被切分，是一个最小可懂版本            | 更细粒度地平衡 prefill 吞吐与 decode 延迟，避免长 prompt 长时间占满 step                        |
+| KV cache 管理   | `BlockManager` 管理 free/used blocks、`ref_count`、prefix hash  | 更完整的 block pool、eviction、prefix cache、并发访问控制、不同 attention backend 和硬件路径    |
+| PagedAttention  | 通过 `block_table`、`slot_mapping`、`block_tables` 展示核心机制 | kernel/backend 更复杂，服务多模型、多 batch shape、多设备和高并发场景                           |
+| Prefix cache    | 完整 block 的链式 hash；命中后复用 block；重新分配时清理旧 hash | 更完整的自动前缀缓存、block hash 元数据、eviction 策略，以及 LoRA、多模态等额外上下文因素       |
+| 模型执行        | 主要覆盖 Qwen3、TP、采样、CUDA graph 的核心路径                 | 覆盖更多模型结构、量化、LoRA、speculative decoding、分布式执行和服务接口                        |
 
-可以这样定位 nano-vllm 与生产 vLLM 的关系：
+因此，nano-vllm 不是生产 vLLM 的缩小版清单，而是一个足够小的执行剖面。它保留了最关键的抽象：请求状态、连续调度、paged KV cache、prefix cache、preemption、prefill/decode、TP 和采样。生产 vLLM 在这些抽象上继续加入更复杂的策略、后端和服务化约束。
+
+一个可靠的迁移理解方式是：
 
 ```text
-nano-vllm 是帮助理解 vLLM 核心机制的最小化实现。
-它可以帮助讲清楚请求生命周期、continuous batching、prefill/decode、
-paged KV cache、prefix cache、抢占和模型执行链路。
-生产 vLLM 在这些核心思想上扩展了更复杂的 scheduler、cache manager、
-kernel backend、模型生态和服务化能力。
+nano-vllm 先回答“这个机制为什么存在、最小闭环怎样跑通”；
+生产 vLLM 再回答“高并发、多模型、多后端和长上下文下，这个机制如何稳定、高效、可配置地运行”。
 ```
 
 [回到目录](#top)
 
-<a id="check"></a>
+<a id="core-summary"></a>
 
-## 19. 理解检查与表达线索
+## 19. 关键机制压缩总结
 
-如果要完整讲清楚 vLLM 风格推理流程，可以按这个顺序：
+这一节把全文压缩成一组不冗余的技术表达。前文已经给出源码细节，这里只保留概念、动机、方法和 nano-vllm 对应位置。
 
-1. 请求进入后会被包装成 `Sequence`，放入 scheduler 的 `waiting` 队列。
-2. scheduler 每轮先尝试 prefill，根据 token budget 和 KV block 资源决定调度哪些请求。
-3. prefill 前通过 BlockManager 分配 paged KV blocks，建立 sequence 的 `block_table`。
-4. ModelRunner 把 sequence 转成 varlen attention 输入，设置 context。
-5. Attention 根据 `slot_mapping` 把新 token 的 K/V 写入物理 KV cache。
-6. prefill 用最后一个 query 的 logits 采样第一个 completion token。
-7. postprocess 更新 `num_cached_tokens`、注册 prefix cache，并把采样 token append 到 sequence。
-8. 后续 decode 每轮每个 sequence 只输入上一个采样 token，通过 `block_tables` 读取完整历史 KV。
-9. 如果 KV block 不够，scheduler 会 preempt 一些 running 请求，把它们释放后放回 waiting。
-10. 请求遇到 EOS 或达到 max_tokens 后释放 KV blocks，输出 completion。
+### 19.1 请求进入后的执行链路
 
-如果被追问几个重点：
+用户请求进入推理引擎后，先被 tokenize 并封装成 `Sequence`，进入 scheduler 的 `waiting` 队列。调度器每轮先尝试 prefill：如果 KV blocks 足够，就通过 `BlockManager.allocate()` 建立 `block_table`，再由 `ModelRunner.prepare_prefill()` 生成 `input_ids/positions/slot_mapping/block_tables`。模型 forward 时，Attention 把新 token 的 K/V 写入物理 KV cache，LM head 只取最后 query 的 logits 采样第一个 completion token。
 
-- **Continuous Batching**：每个 step 都重新从 waiting/running 选择请求，而不是固定 batch 跑到底。
-- **Chunked Prefill**：长 prompt 可以切成多轮 prefill，避免一次占满 token budget，但切分策略会影响吞吐和延迟。
-- **Paged KV Cache**：sequence 的逻辑 block 通过 `block_table` 映射到物理 KV block，避免为每条请求申请连续大块显存。
-- **Prefix Cache**：完整 block 通过链式 hash 注册，后续相同前缀可以复用已有 KV。
-- **Sampling**：nano-vllm 用 temperature softmax 得到概率分布，再用 exponential race 等价地从该分布中抽样。
-- **Decode**：每轮只推进一个 token，但通过 KV cache 看完整历史上下文。
+prefill 完成后，sequence 进入 `running`。后续 decode 每轮只输入上一个采样 token，但通过 `block_tables` 读取完整历史 KV；采样出新 token 后，`postprocess()` 更新 `num_cached_tokens`、必要时注册 prefix cache，并把新 token append 到 sequence。请求遇到 EOS 或达到 `max_tokens` 后释放 KV blocks，并从 `running` 移除。
+
+压缩成一条链路就是：
+
+```text
+prompt
+-> Sequence(waiting)
+-> Scheduler.schedule(prefill/decode)
+-> BlockManager 分配或扩展 KV blocks
+-> ModelRunner 准备张量和 attention context
+-> Attention 写入新 KV，并按 block table 读取历史 KV
+-> Sampler 采样下一个 token
+-> Scheduler.postprocess 更新状态、注册 cache、释放完成请求
+```
+
+### 19.2 Continuous Batching
+
+Continuous Batching 是请求级动态调度：推理服务不是把固定 batch 从头跑到尾，而是在每个 step 根据 `waiting/running` 请求状态、token budget 和 KV block 资源重新组批。
+
+它解决的是在线推理里的动态性问题：请求到达时间不同，prompt 长度不同，decode 轮数不同，完成时间也不同。固定 batch 会让已完成请求占住位置，让新请求等待下一轮，同时让长 prompt 或长 decode 请求拖慢整体吞吐与延迟。
+
+nano-vllm 中的对应实现是 `Scheduler.schedule()`：
+
+- `waiting` 中的请求优先尝试 prefill。
+- prefill 受 `max_num_batched_tokens` 限制，长 prompt 可能走 chunked prefill。
+- 如果本轮没有 prefill 可执行，再从 `running` 中调度 decode。
+- decode 每个 sequence 每轮只推进 1 个 token。
+- 每轮 `LLMEngine.step()` 都执行 `schedule -> run -> postprocess`，完成请求释放 KV，未完成请求继续留在调度池。
+
+生产 vLLM 的核心思想一致，但会在这个基础上加入更复杂的公平性、优先级、prefill/decode 混排、抢占与长上下文策略。
+
+### 19.3 PagedAttention / Paged KV Cache
+
+PagedAttention 的核心不是单纯“把 KV 分块”，而是把 sequence 的逻辑上下文和物理显存布局解耦。每条 sequence 的上下文被切成固定大小的逻辑 blocks，`block_table` 记录逻辑 block 到物理 KV block 的映射，attention kernel 再按表读取历史 KV。
+
+它解决的是 KV cache 的显存管理问题。在线推理里请求长度不可预测，如果每个请求都预留连续大块 KV cache，预留太大会浪费显存，预留太小会扩容困难；请求动态结束和进入还会造成碎片。paged KV cache 让物理 blocks 可以非连续分配、释放和复用。
+
+nano-vllm 中的对应实现是：
+
+- `Sequence.block_table` 保存逻辑 block 到物理 block id 的映射。
+- `BlockManager.allocate()` 为 prefill 分配 blocks。
+- `BlockManager.may_append()` 在 decode token 落入新 block 时扩展 `block_table`。
+- `ModelRunner.prepare_prefill/prepare_decode()` 生成 `slot_mapping` 和 `block_tables`。
+- `store_kvcache()` 按 `slot_mapping` 写入 K/V。
+- `flash_attn_with_kvcache()` 在 decode 中按 `block_tables` 读取历史 KV。
+
+生产 vLLM 的 PagedAttention 沿用同一类 block table 思想，但在 kernel backend、cache manager、eviction、并发控制和硬件适配上更复杂。
+
+### 19.4 Prefix Caching
+
+Prefix Caching 是复用相同前缀已经计算好的 KV cache。新请求如果从开头连续命中若干完整 blocks，就不需要重新 prefill 这些 token，只计算未命中的后缀部分。
+
+它解决的是重复前缀带来的 prefill 浪费：系统提示词、聊天模板、few-shot examples、相同文档前缀都可能在多个请求中重复出现。复用前缀 KV 可以减少首 token 前的计算量。
+
+nano-vllm 中的对应实现是：
+
+- `hash_blocks()` 只注册已经完整写入 KV cache 的 blocks。
+- `compute_hash(token_ids, prefix)` 使用链式 hash，把前一个 block 的 hash 纳入当前 block hash。
+- `can_allocate()` 从 sequence 开头连续匹配 cached blocks，中间断开就停止。
+- 命中 hash 后比较当前 block 的 `token_ids`，降低错误复用风险。
+- `allocate()` 对命中的 used block 增加 `ref_count`；对仍在 free 中但未被覆盖的 block 重新启用。
+
+边界也要明确：nano-vllm 只做 block-level、从开头连续命中的 prefix cache；候选请求的最后一个逻辑 block 不参与复用，以保证 prefill 仍有 query token 产生 logits。同一轮刚算出的 prefix 也不会立刻被另一个请求复用，因为 cache 注册发生在 forward 之后的 `postprocess()`。
 
 [回到目录](#top)

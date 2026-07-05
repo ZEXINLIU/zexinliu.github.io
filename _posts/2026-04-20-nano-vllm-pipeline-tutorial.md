@@ -2004,3 +2004,5 @@ nano-vllm 中的对应实现是：
 边界也要明确：nano-vllm 只做 block-level、从开头连续命中的 prefix cache；候选请求的最后一个逻辑 block 不参与复用，以保证 prefill 仍有 query token 产生 logits。同一轮刚算出的 prefix 也不会立刻被另一个请求复用，因为 cache 注册发生在 forward 之后的 `postprocess()`。
 
 [回到目录](#top)
+
+<!-- deployment-refresh: 2026-07-05 -->

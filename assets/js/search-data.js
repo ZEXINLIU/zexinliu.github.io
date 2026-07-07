@@ -51,11 +51,11 @@ ninja.data = [{
               handler: () => {
                 window.location.href = "/books/";
               },
-            },{id: "post-llm-rl-from-bellman-target-ppo-clip-to-token-sequence-ratio-and-training-inference-mismatch",
+            },{id: "post-modern-rl-objectives-in-code-bellman-targets-trust-regions-ppo-clip-kl-estimators-and-llm-token-sequence-granularity",
         
-          title: "LLM RL: from Bellman Target, PPO Clip to Token/Sequence Ratio and Training-Inference Mismatch...",
+          title: "Modern RL Objectives in Code: Bellman Targets, Trust Regions, PPO Clip, KL Estimators,...",
         
-        description: "A structured reinforcement learning tutorial from Bellman targets and policy gradients to PPO, GRPO, DAPO, CISPO, GSPO, DPO, and training-inference mismatch.",
+        description: "从 Bellman target、policy gradient、TRPO trust region、PPO clip 与 KL estimator 出发，围绕 reward shaping、advantage 粒度、importance ratio/clip 单位和 loss aggregation，拆解 PPO、GRPO、DAPO、Dr. GRPO、CISPO、GSPO、DPO 及 training-inference mismatch。",
         section: "Posts",
         handler: () => {
           

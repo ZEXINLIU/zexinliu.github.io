@@ -91,7 +91,7 @@ $$
 如果环境模型已知，最核心的两个概率对象是状态转移和奖励分布：
 
 $$
-p(s' \mid s,a), \quad p(r \mid s,a)
+p(s^{\prime} \mid s,a), \quad p(r \mid s,a)
 $$
 
 这两个对象决定 model-based dynamic programming 是否可用；如果它们未知，就要转向 MC、TD、Sarsa、Q-learning 这类 model-free 采样算法。
@@ -108,8 +108,8 @@ Bellman expectation equation 把 $v_\pi(s)$ 拆成即时奖励和下一个状态
 
 $$
 \begin{aligned}
-v_\pi(s) &= \sum_{a\in\mathcal{A}}\pi(a \mid s)\left[\sum_r p(r \mid s,a)r + \gamma \sum_{s'\in \mathcal{S}}p(s' \mid s,a) v_\pi(s')\right] \\
-v_\pi(s) &= r_\pi(s) + \gamma\sum_{s'\in\mathcal{S}} p_\pi(s' \mid s) v_\pi(s') \\
+v_\pi(s) &= \sum_{a\in\mathcal{A}}\pi(a \mid s)\left[\sum_r p(r \mid s,a)r + \gamma \sum_{s^{\prime}\in \mathcal{S}}p(s^{\prime} \mid s,a) v_\pi(s^{\prime})\right] \\
+v_\pi(s) &= r_\pi(s) + \gamma\sum_{s^{\prime}\in\mathcal{S}} p_\pi(s^{\prime} \mid s) v_\pi(s^{\prime}) \\
 v_\pi &= r_\pi+\gamma P_\pi v_\pi \\
 v_\pi(s) &= \mathbb{E}[R_{t+1} + \gamma v_\pi(S_{t+1}) \mid S_t=s].
 \end{aligned}
@@ -147,8 +147,8 @@ $$
 v &= \max_{\pi\in\Pi}(r_\pi+\gamma P_\pi v)=f(v),\\
 \left[r_\pi\right]_s
 &= \sum_{a\in\mathcal{A}}\pi(a \mid s)\sum_{r\in\mathcal{R}}p(r \mid s,a)r,\\
-\left[P_\pi\right]_{s,s'}
-&= \sum_{a\in\mathcal{A}}\pi(a \mid s)p(s' \mid s,a).
+\left[P_\pi\right]_{s,s^{\prime}}
+&= \sum_{a\in\mathcal{A}}\pi(a \mid s)p(s^{\prime} \mid s,a).
 \end{aligned}
 $$
 
@@ -191,19 +191,19 @@ $$
 给定 $(s,a)$ 后，第一步动作已经不再由策略采样，因此动作价值的 Bellman expectation equation 先展开环境，再展开下一状态的策略：
 
 $$
-q_\pi(s,a) = \sum_{r\in\mathcal{R}}p(r \mid s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s' \mid s,a)v_\pi(s')
+q_\pi(s,a) = \sum_{r\in\mathcal{R}}p(r \mid s,a)r + \gamma\sum_{s^{\prime}\in\mathcal{S}}p(s^{\prime} \mid s,a)v_\pi(s^{\prime})
 $$
 
 等价地，可以完全写成 action-value 递推：
 
 $$
 \begin{aligned}
-q_\pi(s,a) &= \sum_{r\in\mathcal{R}}p(r \mid s,a)r + \gamma\sum_{s'\in\mathcal{S}}p(s' \mid s,a) \left(\sum_{a'\in\mathcal{A}}\pi(a' \mid s')q_\pi(s',a')\right) \\
+q_\pi(s,a) &= \sum_{r\in\mathcal{R}}p(r \mid s,a)r + \gamma\sum_{s^{\prime}\in\mathcal{S}}p(s^{\prime} \mid s,a) \left(\sum_{a^{\prime}\in\mathcal{A}}\pi(a^{\prime} \mid s^{\prime})q_\pi(s^{\prime},a^{\prime})\right) \\
 q_\pi(s,a) &= \mathbb{E}[R_{t+1} + \gamma q_\pi(S_{t+1},A_{t+1}) \mid S_t=s,A_t=a].
 \end{aligned}
 $$
 
-上面两个式子的等价性来自条件独立分解 $p(s',a' \mid s,a)=p(s' \mid s,a)\pi(a' \mid s')$。直觉上，采取动作 $a_t$ 的价值 = 这个动作带来的即时奖励 + 它导致的下一状态的平均动作价值。
+上面两个式子的等价性来自条件独立分解 $p(s^{\prime},a^{\prime} \mid s,a)=p(s^{\prime} \mid s,a)\pi(a^{\prime} \mid s^{\prime})$。直觉上，采取动作 $a_t$ 的价值 = 这个动作带来的即时奖励 + 它导致的下一状态的平均动作价值。
 
 在所有 state-action pair 上写成向量方程：
 
@@ -213,8 +213,8 @@ q_\pi &= \tilde r+\gamma P\Pi q_\pi,\\
 \left[q_\pi\right]_{(s,a)} &= q_\pi(s,a),\\
 \left[\tilde r\right]_{(s,a)}
 &= \sum_{r\in\mathcal{R}}p(r \mid s,a)r,\\
-\left[P\right]_{(s,a),s'} &= p(s' \mid s,a),\\
-\Pi_{s',a'} &= \pi(a' \mid s').
+\left[P\right]_{(s,a),s^{\prime}} &= p(s^{\prime} \mid s,a),\\
+\Pi_{s^{\prime},a^{\prime}} &= \pi(a^{\prime} \mid s^{\prime}).
 \end{aligned}
 $$
 
@@ -222,8 +222,8 @@ Action value 的 Bellman optimality equation 是 Q-learning 和 DQN 的直接来
 
 $$
 \begin{aligned}
-q^{\ast}(s,a) &= r(s,a) + \gamma\sum_{s'\in\mathcal{S}} p(s' \mid s,a) \max_{a'} q^{\ast}(s',a') \\
-q^{\ast}(s,a) &= \mathbb{E}[R_{t+1} + \gamma \max_{a'} q^{\ast}(S_{t+1},a') \mid S_t=s,A_t=a].
+q^{\ast}(s,a) &= r(s,a) + \gamma\sum_{s^{\prime}\in\mathcal{S}} p(s^{\prime} \mid s,a) \max_{a^{\prime}} q^{\ast}(s^{\prime},a^{\prime}) \\
+q^{\ast}(s,a) &= \mathbb{E}[R_{t+1} + \gamma \max_{a^{\prime}} q^{\ast}(S_{t+1},a^{\prime}) \mid S_t=s,A_t=a].
 \end{aligned}
 $$
 
@@ -237,7 +237,7 @@ Value-based 方法的主线是：先估计 $v(s)$ 或 $q(s,a)$，再通过 greed
 
 #### Model-Based Dynamic Programming
 
-Dynamic programming 假设环境模型已知，即奖励概率 $p(r \mid s,a)$ 和状态转移概率 $p(s' \mid s,a)$ 可用。奖励概率可以进一步得到 $r(s,a)=\sum_r p(r \mid s,a)r$，转移概率告诉我们在状态 $s$ 执行动作 $a$ 后，会以什么概率到达各个 $s'$。
+Dynamic programming 假设环境模型已知，即奖励概率 $p(r \mid s,a)$ 和状态转移概率 $p(s^{\prime} \mid s,a)$ 可用。奖励概率可以进一步得到 $r(s,a)=\sum_r p(r \mid s,a)r$，转移概率告诉我们在状态 $s$ 执行动作 $a$ 后，会以什么概率到达各个 $s^{\prime}$。
 
 #### Value Iteration
 
@@ -293,7 +293,7 @@ $$
 
 #### Model-Free Value Learning
 
-Model-free 方法从采样轨迹构造 target，不需要显式访问 $p(s' \mid s,a)$ 和 $p(r \mid s,a)$。MC、TD、Sarsa、Q-learning 的差别主要体现在 target 的随机变量数量、是否等 episode 结束、以及下一步动作来自真实采样还是贪心最大化。
+Model-free 方法从采样轨迹构造 target，不需要显式访问 $p(s^{\prime} \mid s,a)$ 和 $p(r \mid s,a)$。MC、TD、Sarsa、Q-learning 的差别主要体现在 target 的随机变量数量、是否等 episode 结束、以及下一步动作来自真实采样还是贪心最大化。
 
 #### Monte Carlo Control
 
@@ -350,7 +350,7 @@ $$
 其余 $(s,a) \neq (s_t,a_t)$ 保持不变。这个更新对应 action-value Bellman expectation equation：
 
 $$
-q_\pi(s,a) = \mathbb{E}[R + \gamma q_\pi(S',A') \mid s,a]
+q_\pi(s,a) = \mathbb{E}[R + \gamma q_\pi(S^{\prime},A^{\prime}) \mid s,a]
 $$
 
 采样链路是：
@@ -392,13 +392,13 @@ $$
 DQN 把 Q-learning 的表格 $q(s,a)$ 替换为神经网络 $\hat q(s,a,w)$。训练目标是 squared Bellman optimality error：
 
 $$
-J(w) = \mathbb{E}[(R + \gamma \max_{a'\in\mathcal{A}(S')} \hat{q}(S',a',w_T) - \hat{q}(S,A,w))^{2}]
+J(w) = \mathbb{E}[(R + \gamma \max_{a^{\prime}\in\mathcal{A}(S^{\prime})} \hat{q}(S^{\prime},a^{\prime},w_T) - \hat{q}(S,A,w))^{2}]
 $$
 
 如果 target 和 prediction 使用同一组参数 $w$，目标会随着预测一起移动，所以 DQN 使用 online network $w$ 和 target network $w_T$。梯度为：
 
 $$
-\nabla_w J = -2\mathbb{E}[(R + \gamma \max_{a'\in\mathcal{A}(S')} \hat{q}(S',a',w_T) - \hat{q}(S,A,w)) \nabla_w \hat{q}(S,A,w)]
+\nabla_w J = -2\mathbb{E}[(R + \gamma \max_{a^{\prime}\in\mathcal{A}(S^{\prime})} \hat{q}(S^{\prime},a^{\prime},w_T) - \hat{q}(S,A,w)) \nabla_w \hat{q}(S,A,w)]
 $$
 
 代码化实现要点是：`gather` 取真实执行动作的 Q 值，target network 只生成 bootstrap target，不接收当前 loss 的梯度。
@@ -430,7 +430,7 @@ $$
 Double DQN 把“选择动作”和“评估动作”分开：online network 选动作，target network 评价该动作。
 
 $$
-a^{\ast} = \mathrm{argmax}_{a\in\mathcal{A}(s')}\hat q(s',a,w), \quad y = r+\gamma\hat q(s',a^{\ast},w_T).
+a^{\ast} = \mathrm{argmax}_{a\in\mathcal{A}(s^{\prime})}\hat q(s^{\prime},a,w), \quad y = r+\gamma\hat q(s^{\prime},a^{\ast},w_T).
 $$
 
 两个网络的误差不再通过同一个最大值运算直接叠加，q-value 过高估计得到缓解。
@@ -446,7 +446,7 @@ $$
 DQN 的基本稳定化手段是 target network 和 replay buffer：
 
 1. online network $w$ 每个 gradient step 更新；target network $w_T$ 每隔 $C$ 次迭代复制 $w$。
-2. replay buffer 存储 $\mathcal{B} = \lbrace(s,a,r,s')\rbrace$，近似均匀采样以打破连续样本相关性。
+2. replay buffer 存储 $\mathcal{B} = \lbrace(s,a,r,s^{\prime})\rbrace$，近似均匀采样以打破连续样本相关性。
 
 原始 DQN 的训练方式是边交互边训练：每执行一步动作就从回放池采样训练一次，提高数据利用效率。
 
@@ -455,7 +455,7 @@ DQN 的基本稳定化手段是 target network 和 replay buffer：
 Dueling DQN 改变网络架构，把状态价值和动作优势拆开：
 
 $$
-q(s,a) = v(s) + A(s,a) - \frac{1}{\lvert\mathcal{A}\rvert}\sum_{a'\in\mathcal{A}} A(s,a')
+q(s,a) = v(s) + A(s,a) - \frac{1}{\lvert\mathcal{A}\rvert}\sum_{a^{\prime}\in\mathcal{A}} A(s,a^{\prime})
 $$
 
 这个结构适合很多动作差异不明显的状态。实现上通常是共享 backbone 后接 value head 和 advantage head：
@@ -703,10 +703,10 @@ $$
 其中 off-policy state distribution 为：
 
 $$
-\rho(s)=\sum_{s'\in\mathcal{S}}d_\beta(s')Pr_\pi(s \mid s')
+\rho(s)=\sum_{s^{\prime}\in\mathcal{S}}d_\beta(s^{\prime})Pr_\pi(s \mid s^{\prime})
 $$
 
-$Pr_\pi(s \mid s')$ 是 discounted total transition probability。
+$Pr_\pi(s \mid s^{\prime})$ 是 discounted total transition probability。
 
 带 baseline 的形式是：
 
@@ -1818,9 +1818,9 @@ $$
 $$
 \begin{aligned}
 \mathbb{E}[G_{t+1} \mid S_t=s]
-&= \sum_{s'}\mathbb{E}[G_{t+1} \mid S_t=s,S_{t+1}=s']p(s' \mid s)\\
-&= \sum_{s'}\mathbb{E}[G_{t+1} \mid S_{t+1}=s']p(s' \mid s)\\
-&= \sum_{s'}v_\pi(s')\sum_a\pi(a \mid s)p(s' \mid s,a).
+&= \sum_{s^{\prime}}\mathbb{E}[G_{t+1} \mid S_t=s,S_{t+1}=s^{\prime}]p(s^{\prime} \mid s)\\
+&= \sum_{s^{\prime}}\mathbb{E}[G_{t+1} \mid S_{t+1}=s^{\prime}]p(s^{\prime} \mid s)\\
+&= \sum_{s^{\prime}}v_\pi(s^{\prime})\sum_a\pi(a \mid s)p(s^{\prime} \mid s,a).
 \end{aligned}
 $$
 
@@ -1830,7 +1830,7 @@ $$
 v_\pi(s)=
 \sum_a\pi(a \mid s)
 \left[
-\sum_r p(r \mid s,a)r+\gamma\sum_{s'}p(s' \mid s,a)v_\pi(s')
+\sum_r p(r \mid s,a)r+\gamma\sum_{s^{\prime}}p(s^{\prime} \mid s,a)v_\pi(s^{\prime})
 \right].
 $$
 
@@ -1839,7 +1839,7 @@ $$
 $$
 r_\pi(s)=\sum_a\pi(a \mid s)\sum_r p(r \mid s,a)r,
 \quad
-p_\pi(s' \mid s)=\sum_a\pi(a \mid s)p(s' \mid s,a),
+p_\pi(s^{\prime} \mid s)=\sum_a\pi(a \mid s)p(s^{\prime} \mid s,a),
 $$
 
 则有矩阵形式：
@@ -1859,7 +1859,7 @@ $$
 Bellman optimality operator 定义为
 
 $$
-(Tv)(s)=\max_a\left[r(s,a)+\gamma\sum_{s'}p(s' \mid s,a)v(s')\right].
+(Tv)(s)=\max_a\left[r(s,a)+\gamma\sum_{s^{\prime}}p(s^{\prime} \mid s,a)v(s^{\prime})\right].
 $$
 
 对任意两个 value function $u,v$：
@@ -1867,10 +1867,10 @@ $$
 $$
 \begin{aligned} \mid (Tu)(s)-(Tv)(s) \mid &\le
 \max_a
-\left \mid \gamma\sum_{s'}p(s' \mid s,a)(u(s')-v(s'))
+\left \mid \gamma\sum_{s^{\prime}}p(s^{\prime} \mid s,a)(u(s^{\prime})-v(s^{\prime}))
 \right \mid \\
 &\le
-\gamma\max_a\sum_{s'}p(s' \mid s,a)\ \mid u-v\ \mid _\infty\\
+\gamma\max_a\sum_{s^{\prime}}p(s^{\prime} \mid s,a)\ \mid u-v\ \mid _\infty\\
 &=
 \gamma\ \mid u-v\ \mid _\infty.
 \end{aligned}
@@ -2230,7 +2230,7 @@ $$
 当 $q$ 接近 $p$ 时，不同 $f$-divergence 的二阶项都由 Fisher information 控制。对参数化分布 $p_\theta$：
 
 $$
-D_f(p_0,p_\theta) = \frac{f''(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
+D_f(p_0,p_\theta) = \frac{f^{\prime}'(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
 $$
 
 其中 $F$ 是 Fisher information matrix。KL 散度对应 $f(x)=-\log x$，`k2` 对应的二阶曲率相同，因此当两个分布很接近时：

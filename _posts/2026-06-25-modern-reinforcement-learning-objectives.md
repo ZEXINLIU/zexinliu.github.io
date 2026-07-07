@@ -1,8 +1,8 @@
 ---
 layout: post
-title: "LLM RL: from Bellman Target, PPO Clip to Token/Sequence Ratio and Training-Inference Mismatch"
+title: "Modern RL Objectives in Code: Bellman Targets, Trust Regions, PPO Clip, KL Estimators, and LLM Token/Sequence Granularity"
 date: 2026-06-25 00:00:00
-description: A structured reinforcement learning tutorial from Bellman targets and policy gradients to PPO, GRPO, DAPO, CISPO, GSPO, DPO, and training-inference mismatch.
+description: 从 Bellman target、policy gradient、TRPO trust region、PPO clip 与 KL estimator 出发，围绕 reward shaping、advantage 粒度、importance ratio/clip 单位和 loss aggregation，拆解 PPO、GRPO、DAPO、Dr. GRPO、CISPO、GSPO、DPO 及 training-inference mismatch。
 tags: reinforcement-learning policy-gradient llm-rl ppo rlhf
 categories: technical-notes
 featured: true
@@ -18,35 +18,19 @@ _styles: |
 
 本文重点包括：
 
-- **Bellman 递推把“未来未知”变成可迭代的 bootstrap target。** MC、TD、Sarsa、Q-learning、DQN 的差别不只是采样方式不同，而是 target 中用了实际下一动作、贪心下一动作、目标网络还是整段回报；这个选择决定了偏差、方差、过估计和 off-policy 风险。
-- **策略梯度真正难的不是写出 $\nabla \log \pi_\theta$，而是把整段回报拆成低方差、可归因的训练信号。** REINFORCE 用 trajectory return，baseline/A2C 把状态价值当 control variate，GAE 在 MC 与 TD 之间调偏差-方差，PPO 再用旧策略比值把多轮 minibatch 更新压回可信范围。
-- **TRPO 和 PPO 的关系是“显式约束”到“一阶可优化代理目标”的工程折中。** TRPO 用平均 KL trust region、自然梯度方向和 line search 控制策略步长；PPO 把同一保守思想压进 clipped surrogate，用 `min` 构造 pessimistic bound，换来多轮 minibatch SGD 的易用性。
-- **LLM RL 的核心分歧是 token-level 还是 sequence-level。** PPO 依靠 critic 把整段奖励拆成 token advantage；GRPO 用组内相对奖励让一条 response 的 token 共享 advantage；DAPO 改成 token-level loss 避免长回答被样本均值稀释；CISPO 改裁剪对象以保留 token 梯度；GSPO 把 ratio 提到 sequence level 以降低 token 级重要性权重的方差。
-- **实际训练问题往往藏在目标函数的聚合方式里。** all-correct/all-wrong prompt group 会让 GRPO advantage 消失，低概率但高价值 token 容易被 clip 过早截断，长 CoT 会诱发过长回答和奖励噪声，KL/reference 约束既能防漂移也可能压制从 base model 到 reasoning policy 的必要迁移。
-- **每个关键目标都配自包含代码块，而不是只列本地脚本路径。** 公式、mask、logprob、ratio、advantage、stop-gradient 和聚合维度会在正文中直接对应；事实来源以论文和公开实现为准，本地教学代码只作为内部理解参考，不作为公开源码引用。
+- **Advantage 粒度需要同时核对信号来源和张量 shape。** PPO/RLHF 使用 response-level outcome reward、逐 token KL penalty、value function 和 GAE 得到 token-specific advantage；GRPO 得到 response-level group advantage 后复制到 token 维度参与 policy loss。
+- **Loss reduction 的分母决定长 CoT 的梯度权重。** PPO/GRPO 常见 sample-level mean 让每条 response 等权；DAPO 改用 token-level denominator；Dr. GRPO 用常数长度预算并移除标准差归一化，分别处理 length bias 和 difficulty bias。
+- **Clip 机制分成四条优化路径。** PPO/GRPO 的 `min` 截断有利方向越界 token 的梯度；DAPO 放宽正样本上界；CISPO 裁剪并 detach IS weight；GSPO 在 sequence-level ratio 上裁剪整条 response。
+- **Reward shaping 影响 advantage 的语义。** RLHF 的 token-level KL penalty 控制当前策略相对 reference 的逐 token 偏离，并进入 critic/GAE；DAPO 的 overlong penalty 先修正整条 response reward，再进入 group advantage。
+- **Bellman、policy gradient、TRPO trust region 保留后文所需的公式接口。** 基础章节只承担 value target、policy update、ratio、clip 和梯度流向的回查功能。
 
 ## 目录
 
 - [0. 阅读和来源说明](#0-阅读和来源说明)
-- [Basic concepts](#basic-concepts)
-  - [Trajectory, Return, And Environment Model](#trajectory-return-and-environment-model)
-  - [State Value And Bellman Expectation](#state-value-and-bellman-expectation)
-  - [Bellman Optimality For State Value](#bellman-optimality-for-state-value)
-  - [Action Value And State-Action Bellman Equations](#action-value-and-state-action-bellman-equations)
-- [Basic algorithms](#basic-algorithms)
-  - [Value-based RL](#value-based-rl)
-    - [Model-Based Dynamic Programming](#model-based-dynamic-programming)
-    - [Model-Free Value Learning](#model-free-value-learning)
-    - [DQN And Function Approximation](#dqn-and-function-approximation)
-    - [On-Policy Vs Off-Policy](#on-policy-vs-off-policy)
-  - [Policy-based RL](#policy-based-rl)
-    - [Policy Gradient Theorem](#policy-gradient-theorem)
-    - [REINFORCE](#reinforce)
-    - [REINFORCE With Baseline](#reinforce-with-baseline)
-    - [Q Actor-Critic](#q-actor-critic)
-    - [Advantage Actor-Critic](#advantage-actor-critic)
-    - [Off-Policy Actor-Critic](#off-policy-actor-critic)
+- [Basic concepts](#basic-concepts)：Bellman target 与 value/action-value 记号回查
+- [Basic algorithms](#basic-algorithms)：MC/TD/DQN、policy gradient、actor-critic 回查
 - [Modern algorithms](#modern-algorithms)
+  - [LLM RL granularity](#llm-rl-granularity)
   - [TRPO -> PPO](#trpo--ppo-从约束优化到裁剪代理目标)
   - [PPO](#proximal-policy-optimization-ppo)
   - [GRPO](#grpo-from-deepseekmath)
@@ -57,39 +41,36 @@ _styles: |
   - [RLHF](#reinforcement-learning-from-human-feedback-rlhf)
   - [DPO](#direct-preference-optimization-dpo)
 - [Training-Inference Mismatch](#training-inference-mismatch)
-- [Mathematical tools behind algorithms](#mathematical-tools-behind-algorithms)
-  - [Bellman expectation equation 推导](#bellman-expectation-equation-推导)
-  - [Bellman optimality contraction](#bellman-optimality-contraction)
-  - [策略梯度定理证明](#策略梯度定理证明)
-  - [KL divergence directionality and estimators](#kl-divergence-directionality-and-estimators)
-  - [TRPO trust-region 二阶近似](#trpo-trust-region-二阶近似)
-  - [Bradley-Terry preference model](#bradley-terry-preference-model)
-  - [Statistics related identities](#statistics-related-identities)
+- [Mathematical tools behind algorithms](#mathematical-tools-behind-algorithms)：证明和长推导集中回查
+  - [Policy gradient theorem](#策略梯度定理证明)
+  - [PPO clip gradient sign](#ppo-clip-单边裁剪梯度符号)
+  - [TRPO trust region](#trpo-trust-region-二阶近似)
+  - [Bradley-Terry / KL / KL estimator](#bradley-terry-preference-model)
 
 ## 0. 阅读和来源说明
 
 阅读顺序建议：
 
-1. **Basic concepts**：先建立 $v_\pi(s)$、 $q_\pi(s,a)$、Bellman expectation equation 和 Bellman optimality equation。
-2. **Value-based RL**：看 MC、TD、Sarsa、Q-learning、DQN 如何把 Bellman 递推变成采样 target。
-3. **Policy-based RL**：看策略梯度定理、REINFORCE、baseline、QAC/A2C 和 off-policy actor-critic 如何直接优化 $\pi_\theta$。
-4. **Modern algorithms**：比较 PPO、GRPO、DAPO、CISPO、GSPO、Reward Model、RLHF、DPO 的目标函数、粒度选择和训练稳定性问题。
-5. **Mathematical tools**：回查 Bellman 推导、策略梯度定理、KL 非对称性与 KL estimator、TRPO 二阶近似、Bradley-Terry。
+1. **Modern algorithms**：先读统一粒度框架，再比较 PPO、GRPO、DAPO、Dr. GRPO、CISPO、GSPO、Reward Model、RLHF、DPO 的目标函数、粒度选择和训练稳定性问题。
+2. **Training-Inference Mismatch**：把 reward/verifier、长度、logprob、MoE routing 和评测协议错位放到同一张问题图里看。
+3. **Basic concepts / Basic algorithms**：当后文用到 Bellman target、GAE、importance ratio、actor-critic 或 TRPO/PPO 约束来源时再回查。
+4. **Mathematical tools**：回查 Bellman 推导、策略梯度定理、TRPO 二阶近似、Bradley-Terry、KL 非对称性和 KL estimator。
 
 来源分层如下：
 
-- **论文是公式和时间线基准**：[DQN](https://arxiv.org/abs/1312.5602) (2013)、[Double DQN](https://arxiv.org/abs/1509.06461) (2015)、[Dueling DQN](https://arxiv.org/abs/1511.06581) (2015)、[TRPO](https://arxiv.org/abs/1502.05477) (2015)、[GAE](https://arxiv.org/abs/1506.02438) (2015)、[Scheduled Sampling](https://arxiv.org/abs/1506.03099) (2015)、[PPO](https://arxiv.org/abs/1707.06347) (2017)、[RLHF summarization](https://arxiv.org/abs/2009.01325) (2020)、[InstructGPT](https://arxiv.org/abs/2203.02155) (2022)、[DPO](https://arxiv.org/abs/2305.18290) (2023)、[GRPO/DeepSeekMath](https://arxiv.org/abs/2402.03300) (2024)、[DAPO](https://arxiv.org/abs/2503.14476) (2025)、[CISPO/MiniMax-M1](https://arxiv.org/abs/2506.13585) (2025)、[GSPO](https://arxiv.org/abs/2507.18071) (2025)。模仿学习中的分布偏移和数据聚合参考 [DAgger](https://proceedings.mlr.press/v15/ross11a.html)。
+- **论文是公式和时间线基准**：[DQN](https://arxiv.org/abs/1312.5602) (2013)、[Double DQN](https://arxiv.org/abs/1509.06461) (2015)、[Dueling DQN](https://arxiv.org/abs/1511.06581) (2015)、[TRPO](https://arxiv.org/abs/1502.05477) (2015)、[GAE](https://arxiv.org/abs/1506.02438) (2015)、[Scheduled Sampling](https://arxiv.org/abs/1506.03099) (2015)、[PPO](https://arxiv.org/abs/1707.06347) (2017)、[RLHF summarization](https://arxiv.org/abs/2009.01325) (2020)、[InstructGPT](https://arxiv.org/abs/2203.02155) (2022)、[DPO](https://arxiv.org/abs/2305.18290) (2023)、[GRPO/DeepSeekMath](https://arxiv.org/abs/2402.03300) (2024)、[DAPO](https://arxiv.org/abs/2503.14476) (2025)、[Dr. GRPO](https://arxiv.org/abs/2503.20783) (2025)、[CISPO/MiniMax-M1](https://arxiv.org/abs/2506.13585) (2025)、[GSPO](https://arxiv.org/abs/2507.18071) (2025)。模仿学习中的分布偏移和数据聚合参考 [DAgger](https://proceedings.mlr.press/v15/ross11a.html)。
 - **公开实现用于核对工程对象**：[OpenAI Baselines PPO2](https://github.com/openai/baselines/tree/master/baselines/ppo2) 对应 PPO 的 rollout、advantage、clip、value loss；[OpenAI Spinning Up](https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html) 对应 policy gradient / actor-critic 推导；[Hugging Face TRL](https://github.com/huggingface/trl) 对应 DPO/GRPO 等 trainer 的公开实现；[DAPO 项目页](https://dapo-sia.github.io/) 和 [DAPO 代码](https://github.com/BytedTsinghua-SIA/DAPO) 对应 DAPO 的开源训练 recipe；[MiniMax-M1](https://github.com/MiniMax-AI/MiniMax-M1) 对应 CISPO 的公开发布。
-- **TRPO 的推导参考**：[动手学强化学习 TRPO 章节](https://hrl.boyuai.com/chapter/2/trpo%E7%AE%97%E6%B3%95#113-%E8%BF%91%E4%BC%BC%E6%B1%82%E8%A7%A3) 对应近似求解流程；[TRPO 深度拆解](https://yam.gift/2026/05/11/NLP/LLM-Training/2026-05-11-TRPO/) 对应重要性采样、KL trust region 和后训练视角。
 - **正文代码块是教学化重写**：它们服务于公式理解，保留输入、mask、advantage、ratio 和梯度流向，不等同于某个框架的完整训练脚本。外部博客和中文材料只作为直觉辅助，不作为唯一依据。
 
-# Basic concepts
+## Basic concepts
+
+这一节作为后文公式的最小回查区。已经熟悉 Bellman expectation/optimality、state value 和 action value 的读者，可以直接跳到 [Modern algorithms](#modern-algorithms)。
 
 本节采用 Sutton & Barto 常见记号：时刻 $t$，智能体处于状态 $S_t$，按策略 $\pi$ 选择动作 $A_t$，环境转移到 $S_{t+1}$ 并返回即时奖励 $R_{t+1}$。大写字母表示随机变量，小写字母表示随机变量的具体取值。
 
-## Trajectory, Return, And Environment Model
+### Trajectory, Return, And Environment Model
 
-Trajectory 是强化学习里最基本的数据对象：它不是独立样本集合，而是一条由策略和环境共同生成的随机链。
+Trajectory 是强化学习里最基本的数据对象：一条由策略和环境共同生成的随机链。
 
 $$
 S_t \xrightarrow{A_t} S_{t+1}, R_{t+1} \xrightarrow{A_{t+1}} S_{t+2}, R_{t+2} \cdots
@@ -115,7 +96,7 @@ $$
 
 这两个对象决定 model-based dynamic programming 是否可用；如果它们未知，就要转向 MC、TD、Sarsa、Q-learning 这类 model-free 采样算法。
 
-## State Value And Bellman Expectation
+### State Value And Bellman Expectation
 
 State value 衡量“从状态 $s$ 出发并继续执行策略 $\pi$，未来总回报的期望”：
 
@@ -151,7 +132,7 @@ $P_\pi$ 是非负随机矩阵，每一行和为 1。由此可以得到两类求�
 1. Closed-form solution: $v_\pi = (I -\gamma P_\pi)^{-1} r_\pi$，可逆性可用 Gershgorin circle theorem 证明。
 2. Iterative solution: $v_{k+1} = r_\pi + \gamma P_\pi v_k,\quad k = 0, 1, 2, \dots$，收敛性可通过证明误差 $v_k - v_\pi$ 收敛到 0 得到。
 
-## Bellman Optimality For State Value
+### Bellman Optimality For State Value
 
 Bellman expectation equation 评估给定策略；Bellman optimality equation 直接问“当前状态下能达到的最优价值是多少”。元素形式是：
 
@@ -193,7 +174,7 @@ $$
 \pi^{\ast} = \mathrm{argmax}_{\pi\in\Pi}(r_\pi+\gamma P_\pi v^{\ast})
 $$
 
-## Action Value And State-Action Bellman Equations
+### Action Value And State-Action Bellman Equations
 
 Action value 衡量“已经在状态 $s$ 选定动作 $a$ 后，再继续执行策略 $\pi$ 的未来总回报期望”：
 
@@ -246,13 +227,15 @@ q^{\ast}(s,a) &= \mathbb{E}[R_{t+1} + \gamma \max_{a'} q^{\ast}(S_{t+1},a') \mid
 \end{aligned}
 $$
 
-# Basic algorithms
+## Basic algorithms
 
-## Value-based RL
+这一节保留 MC/TD/DQN、policy gradient 和 actor-critic 的关键公式，目的是支撑后文 PPO、GRPO、DAPO、CISPO、GSPO 的目标函数对照。若读者已经熟悉这些基础算法，可以把本节当作 reference appendix。
 
-Value-based 方法的主线是：先估计 $v(s)$ 或 $q(s,a)$，再通过 greedy 或 $\epsilon$-greedy 从价值函数中导出策略。分支之间最关键的区别不是名字，而是 target 怎么构造、是否 bootstrap、是否依赖环境模型、是否 on-policy。
+### Value-based RL
 
-### Model-Based Dynamic Programming
+Value-based 方法的主线是：先估计 $v(s)$ 或 $q(s,a)$，再通过 greedy 或 $\epsilon$-greedy 从价值函数中导出策略。各分支的差异集中在 target 构造、bootstrap、环境模型依赖和 on-policy/off-policy 设置。
+
+#### Model-Based Dynamic Programming
 
 Dynamic programming 假设环境模型已知，即奖励概率 $p(r \mid s,a)$ 和状态转移概率 $p(s' \mid s,a)$ 可用。奖励概率可以进一步得到 $r(s,a)=\sum_r p(r \mid s,a)r$，转移概率告诉我们在状态 $s$ 执行动作 $a$ 后，会以什么概率到达各个 $s'$。
 
@@ -308,9 +291,9 @@ $$
 
 这里 $q_{\pi_k}(s,a)$ 的作用很关键：policy evaluation 先估计 $v_{\pi_k}(s)$，再通过 system model 得到 $q_{\pi_k}(s,a)$；policy improvement 基于 $q_{\pi_k}(s,a)$ 得到新的 $\pi_{k+1}$。
 
-### Model-Free Value Learning
+#### Model-Free Value Learning
 
-Model-free 方法不直接使用 $p(s' \mid s,a)$ 和 $p(r \mid s,a)$，而是从采样轨迹构造目标。MC、TD、Sarsa、Q-learning 的差别主要体现在 target 的随机变量数量、是否等 episode 结束、以及下一步动作来自真实采样还是贪心最大化。
+Model-free 方法从采样轨迹构造 target，不需要显式访问 $p(s' \mid s,a)$ 和 $p(r \mid s,a)$。MC、TD、Sarsa、Q-learning 的差别主要体现在 target 的随机变量数量、是否等 episode 结束、以及下一步动作来自真实采样还是贪心最大化。
 
 #### Monte Carlo Control
 
@@ -380,7 +363,7 @@ Sarsa 的 target policy 和 behavior policy 都是同一个 $\epsilon$-greedy �
 
 #### Q-learning
 
-Q-learning 是 off-policy TD control。它的 target 不使用真实采样的 $a_{t+1}$，而是使用下一状态上的 greedy action：
+Q-learning 是 off-policy TD control。它的 target 使用下一状态上的 greedy action，不使用真实采样到的 $a_{t+1}$：
 
 $$
 q_{t+1}(s_t,a_t) =
@@ -404,7 +387,7 @@ $$
 
 行为策略可以是 $\epsilon$-greedy，但 target policy 是 greedy。Q-learning 估计的是最优策略价值，与当前行为策略的探索动作不完全绑定。
 
-### DQN And Function Approximation
+#### DQN And Function Approximation
 
 DQN 把 Q-learning 的表格 $q(s,a)$ 替换为神经网络 $\hat q(s,a,w)$。训练目标是 squared Bellman optimality error：
 
@@ -462,8 +445,8 @@ $$
 
 DQN 的基本稳定化手段是 target network 和 replay buffer：
 
-- online network $w$ 每个 gradient step 更新；target network $w_T$ 每隔 $C$ 次迭代复制 $w$。
-- replay buffer 存储 $\mathcal{B} = \lbrace(s,a,r,s')\rbrace$，近似均匀采样以打破连续样本相关性。
+1. online network $w$ 每个 gradient step 更新；target network $w_T$ 每隔 $C$ 次迭代复制 $w$。
+2. replay buffer 存储 $\mathcal{B} = \lbrace(s,a,r,s')\rbrace$，近似均匀采样以打破连续样本相关性。
 
 原始 DQN 的训练方式是边交互边训练：每执行一步动作就从回放池采样训练一次，提高数据利用效率。
 
@@ -484,7 +467,7 @@ $$
             q_values = values + advantages - advantages.mean(dim=1, keepdim=True)
 ```
 
-### On-Policy Vs Off-Policy
+#### On-Policy Vs Off-Policy
 
 Target policy $\pi_T$ 是将要评估或改进的策略；behavior policy $\pi_b$ 是实际和环境交互、产生动作的策略。二者相同就是 on-policy，二者不同就是 off-policy。
 
@@ -492,11 +475,11 @@ Sarsa 是 on-policy：更新的 target policy 是 $\epsilon$-greedy policy，和
 
 Q-learning 是 off-policy：更新目标使用 greedy policy，而采样数据可以来自另一个 $\epsilon$-greedy behavior policy。
 
-## Policy-based RL
+### Policy-based RL
 
-DQN 训练好后对同一个状态通常输出同一个 greedy 动作；策略网络直接输出动作分布。离散动作场景中，它输出 softmax 概率；连续动作场景中，它输出高斯分布等参数。随机性不是缺陷，而是策略优化的核心：探索和优化都在概率分布上发生。
+DQN 训练好后对同一个状态通常输出同一个 greedy 动作；策略网络直接输出动作分布。离散动作场景中，它输出 softmax 概率；连续动作场景中，它输出高斯分布等参数。随机性承担探索和概率分布优化的角色。
 
-### Policy Gradient Theorem
+#### Policy Gradient Theorem
 
 策略梯度把“提高好动作概率、降低坏动作概率”写成可反向传播的目标。主流可用形式是：
 
@@ -531,7 +514,7 @@ $$
 \mathcal{L}_{PG}(\theta)=-\log\pi_\theta(a_t \mid s_t)\hat{A}_t
 $$
 
-### REINFORCE
+#### REINFORCE
 
 REINFORCE 是 Monte Carlo policy gradient。它用完整轨迹回报估计 $q_\pi(S,A)$：
 
@@ -546,23 +529,23 @@ $$
 
 1. 按当前策略 $\pi_\theta$ 采样一条 episode：
 
-   $$
-   \lbrace s_0, a_0, r_1, \dots, s_{T-1}, a_{T-1}, r_T\rbrace
-   $$
+$$
+\lbrace s_0, a_0, r_1, \dots, s_{T-1}, a_{T-1}, r_T\rbrace
+$$
 
 2. 从后往前计算每个时刻的 return：
 
-   ```python
-               for reward in reversed(rewards):
-                   G = reward + gamma * G
-                   returns.insert(0, G)
-   ```
+```python
+            for reward in reversed(rewards):
+                G = reward + gamma * G
+                returns.insert(0, G)
+```
 
 3. 用 $q_t(s_t,a_t)=\sum_{k=t+1}^{T}\gamma^{k-t-1}r_k$ 更新策略：
 
-   $$
-   \theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t \mid s_t)q_t(s_t,a_t)
-   $$
+$$
+\theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln\pi_{\theta_t}(a_t \mid s_t)q_t(s_t,a_t)
+$$
 
 REINFORCE 是 on-policy：采样必须来自当前策略。策略一更新，旧 episode 的分布就不再严格匹配。它的主要问题是高方差，因为 $G_t$ 包含从 $t$ 到 episode 结束的所有随机性。
 
@@ -579,7 +562,7 @@ REINFORCE 是 on-policy：采样必须来自当前策略。策略一更新，旧
     loss = -(log_probs * returns_tensor).mean()
 ```
 
-### REINFORCE With Baseline
+#### REINFORCE With Baseline
 
 Baseline 的目标是降低方差而不改变梯度期望：
 
@@ -628,7 +611,7 @@ $$
     policy_loss = -(log_probs * advantages).mean()
 ```
 
-### Q Actor-Critic
+#### Q Actor-Critic
 
 Q Actor-Critic 用一个 critic 近似 $q(s,a,w)$，再把它作为 actor 的策略梯度权重。每个时间步：
 
@@ -650,7 +633,7 @@ $$
 
 QAC 的问题是需要维护 action-value critic；动作空间大或连续时，动作价值函数的学习会变得更难。
 
-### Advantage Actor-Critic
+#### Advantage Actor-Critic
 
 A2C 把 actor 的权重从 $q_t(s_t,a_t)$ 改成 advantage：
 
@@ -677,19 +660,17 @@ $$
 1. 按 $\pi_\theta(a \mid s_t)$ 生成 $a_t$，观察 $r_{t+1},s_{t+1}$。
 2. 估计 TD error：
 
-   $$
-   \delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)
-   $$
+$$
+\delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)
+$$
 
 3. Actor 使用：
 
-   $$
-   -\delta_t\log\pi_\theta(a_t \mid s_t)
-   $$
+$$
+-\delta_t\log\pi_\theta(a_t \mid s_t)
+$$
 
 4. Critic 使用 $\delta_t^2$ 或等价的 value target loss。
-
-对应代码示意：
 
 ```python
         # TD Error
@@ -706,7 +687,7 @@ $$
         loss = actor_loss + critic_loss
 ```
 
-### Off-Policy Actor-Critic
+#### Off-Policy Actor-Critic
 
 Off-policy actor-critic 允许 behavior policy $\beta$ 采样，target policy $\pi_\theta$ 更新。核心修正是 importance ratio：
 
@@ -725,13 +706,7 @@ $$
 \rho(s)=\sum_{s'\in\mathcal{S}}d_\beta(s')Pr_\pi(s \mid s')
 $$
 
-其中：
-
-$$
-Pr_\pi(s \mid s')
-$$
-
-是 discounted total transition probability。
+$Pr_\pi(s \mid s')$ 是 discounted total transition probability。
 
 带 baseline 的形式是：
 
@@ -744,53 +719,156 @@ $$
 \right]
 $$
 
-实现上，给定 behavior policy：
-
-$$
-\beta(a \mid s)
-$$
+实现上，给定 behavior policy $\beta(a \mid s)$：
 
 1. 用 $\beta(a \mid s_t)$ 采样 $a_t$，观察 $r_{t+1},s_{t+1}$。
 2. 用 $\delta_t=r_{t+1}+\gamma v(s_{t+1},w_t)-v(s_t,w_t)$ 估计 advantage。
 3. Actor loss 使用 importance ratio：
 
-   $$
-   -\frac{\pi_\theta(a_t \mid s_t)}{\beta(a_t \mid s_t)}\delta_t\log\pi_\theta(a_t \mid s_t)
-   $$
+$$
+-\frac{\pi_\theta(a_t \mid s_t)}{\beta(a_t \mid s_t)}\delta_t\log\pi_\theta(a_t \mid s_t)
+$$
 
 4. Critic 也可以用 importance ratio 加权 TD 更新：
 
-   $$
-   w_{t+1}=w_t+\alpha_w
-   \frac{\pi_\theta(a_t \mid s_t)}{\beta(a_t \mid s_t)}
-   \delta_t\nabla_w v(s_t,w_t)
-   $$
+$$
+w_{t+1}=w_t+\alpha_w
+\frac{\pi_\theta(a_t \mid s_t)}{\beta(a_t \mid s_t)}
+\delta_t\nabla_w v(s_t,w_t)
+$$
 
-### Modern algorithms
+## Modern algorithms
+
+<a id="llm-rl-granularity"></a>
+
+### LLM RL 的粒度问题：reward、advantage、ratio、clip 与 loss aggregation
+
+现代 LLM RL 里的 token-level vs sequence-level 需要拆成五个对象：reward 评价单位、advantage 信号来源、importance ratio 修正单位、clip 对象、loss reduction 分母。一条 response $y_i=(y_{i,1},\dots,y_{i,L_i})$ 进入训练时，这五个对象可以选择不同粒度。DAPO、Dr. GRPO、CISPO 和 GSPO 的分歧就落在这些对象的不同组合上。
+
+本文的术语约定是：**response-level** 指一条生成回答一个标量对象，例如 outcome reward 或 group advantage；**token-shaped** 指代码里的张量带有 token 维度；**token-specific** 指数值真的随 token/prefix 改变；**sequence-level ratio/likelihood** 保留给 GSPO 这类整条序列似然比，因为论文术语通常这样写。
+
+#### 奖励：outcome reward 与 shaped token reward
+
+RLHF/RLVR 里的主奖励通常是 response-level outcome reward：reward model 或 verifier 看完整回答 $y_i$ 后给一个标量 $R_i=R(x,y_i)$。训练时仍然可以构造 token-level shaped reward。PPO/RLHF 为了用 critic 和 GAE 计算每个位置的 advantage，常把整段 reward 和逐 token KL penalty 组合起来：
+
+$$
+r_{i,t}^{shaped} =
+\begin{cases}
+-\beta\left(\log \pi_\theta(y_{i,t} \mid x,y_{i,\lt t})-\log \pi_{ref}(y_{i,t} \mid x,y_{i,\lt t})\right),& t\lt L_i\\
+R(x,y_i)-\beta\left(\log \pi_\theta(y_{i,t} \mid x,y_{i,\lt t})-\log \pi_{ref}(y_{i,t} \mid x,y_{i,\lt t})\right),& t=L_i
+\end{cases}
+$$
+
+监督信号 $R(x,y_i)$ 评价整条 response；token-level KL penalty 表示当前策略在该 token 上相对 reference policy 的偏离。PPO/RLHF 的 shaped reward 常用 sampled log-ratio，也就是 k1 形式；GRPO/DeepSeekMath 的目标函数常用 k3 estimator。KL penalty 负责约束策略漂移，不承担 token 正误归因。PPO 再用 value model 和 GAE 把 shaped reward 递推成 $\hat A_{i,t}$。GRPO/RLVR 的规则 verifier 通常不训练 critic，而是把组内相对优势 $\hat A_i$ 复制到整条 response 的所有 token。
+
+PPO 和 GRPO 都可以在目标函数中出现 KL 项，但 KL 的 estimator 和进入位置不同。PPO/RLHF 常把 k1 log-ratio 写进 shaped reward，然后通过 critic/GAE 影响 token-specific advantage；GRPO 通常先用 response-level reward 做组内归一化得到 $\hat A_i$，再把 k3 token-level KL estimator 作为 policy objective 里的 regularizer。GRPO 中“同一条 response 内值都一样”的对象是 $\hat A_{i,t}$；token-level KL 和完整 token loss 仍会随位置变化。k1/k2/k3 的比较见 [KL divergence estimation](#kl-divergence-estimation)。
+
+#### Advantage：credit assignment 的细度
+
+PPO 的 advantage 通常同时具备 token-shaped 和 token-specific 两个性质。critic 估计每个 prefix state 的 value，GAE 把 shaped reward 递推成每个 token/prefix 位置自己的优势：
+
+$$
+\hat A_{i,t}^{GAE} =
+\sum_{k=0}^{L_i-t}(\gamma\lambda)^k
+\left(r_{i,t+k}^{shaped}+\gamma V_\phi(s_{i,t+k+1})-V_\phi(s_{i,t+k})\right).
+$$
+
+GRPO/DAPO/CISPO/GSPO 在 outcome reward 场景中常用 response-level group advantage，然后为了和 token logprob 相乘，把它扩展成 token-shaped tensor：
+
+$$
+\hat A_i =
+\frac{R_i-\frac{1}{G}\sum_{j=1}^{G}R_j}
+{\sqrt{\frac{1}{G}\sum_{j=1}^{G}\left(R_j-\frac{1}{G}\sum_{k=1}^{G}R_k\right)^2}+\epsilon},
+\quad
+\hat A_{i,t}=\hat A_i.
+$$
+
+这个写法去掉 critic，适合数学题、代码题等可验证任务；同一条 response 内所有 token 的 advantage 数值完全相同，关键 token 与模板性 token 使用同一个更新方向。判断 GRPO 的 credit assignment 粒度时，应检查 $\hat A_{i,t}$ 是否随 $t$ 改变，下标本身不足以说明语义粒度。若未来有 step-level verifier 或 process reward，advantage 可以细到步骤或 token，但 ratio 和 clip 的设计还需要重新匹配。
+
+#### Loss aggregation：看分母就能判断长 response 的权重
+
+设 $\ell_{i,t}$ 是一个 token 的 policy objective，例如 clipped surrogate。GRPO/PPO 常见的 sample-level reduction 先在每条 response 内平均，再在 response 间平均：
+
+$$
+J_{\text{sample-mean}} =
+\frac{1}{G}\sum_{i=1}^{G}
+\frac{1}{L_i}\sum_{t=1}^{L_i}\ell_{i,t}.
+$$
+
+这个目标让每条 response 对总 loss 等权。高质量长 response 的总权重和短 response 相同，因此单个 token 的贡献被 $1/L_i$ 稀释；低质量长 response 也会被同样稀释，重复、拖长、无效推理的惩罚不够强。
+
+DAPO 的 token-level policy gradient loss 把所有有效 token 放进同一个分母：
+
+$$
+J_{\text{token-mean}} =
+\frac{1}{\sum_{i=1}^{G}L_i}
+\sum_{i=1}^{G}\sum_{t=1}^{L_i}\ell_{i,t}.
+$$
+
+这个目标让每个 token 的训练权重更接近等价。Dr. GRPO 从同一类长度偏置出发，指出 response-length normalization 和 group standard deviation normalization 都可能引入偏差；它用常数长度预算归一化、去掉组内标准差缩放等方式减少长度和难度对梯度尺度的耦合。DAPO 与 Dr. GRPO 在“不要让长 response 被样本均值系统性稀释”上方向一致，但 DAPO 同时包含 Clip-Higher、Dynamic Sampling 和 Overlong Reward Shaping，Dr. GRPO 还强调标准差归一化带来的 difficulty bias。
+
+#### Ratio 与 clip：off-policy correction 的单位
+
+token-level ratio 按每个 token 修正旧策略 rollout 和当前策略之间的差异：
+
+$$
+r_{i,t}(\theta)=
+\frac{\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})}
+{\pi_{old}(y_{i,t} \mid x,y_{i,\lt t})}.
+$$
+
+PPO/GRPO/DAPO 在 token 上做 clipped surrogate：
+
+$$
+\ell_{i,t}^{clip}=
+\min\left(r_{i,t}\hat A_{i,t},
+clip(r_{i,t},1-\epsilon_{low},1+\epsilon_{high})\hat A_{i,t}\right).
+$$
+
+这个目标的优势是细粒度、易实现；风险是长 response 中每个 token 都有独立 ratio，少数极端 token 会放大方差，并且在 PPO 的 `min` 结构下，有利方向越界的 token 可能直接失去梯度。DAPO 的 Clip-Higher 放宽正向上界，主要保护低概率但高奖励 token；CISPO 则改为裁剪 IS weight 并 stop-gradient，让越界 token 仍然通过 $\log\pi_\theta$ 贡献梯度。
+
+GSPO 的优化对象是 ratio 粒度：如果 outcome reward 和 group advantage 都是 response-level 标量，重要性采样比值也应使用整条序列的似然比，避免让每个 token 的局部 ratio 独立修正同一个 response-level 信号：
+
+$$
+s_i(\theta)=
+\exp\left(
+\frac{1}{L_i}\sum_{t=1}^{L_i}\log r_{i,t}(\theta)
+\right).
+$$
+
+GSPO 的 clip 判断发生在整条 response 上：
+
+$$
+\ell_i^{seq}=
+\min\left(s_i\hat A_i,
+clip(s_i,1-\epsilon,1+\epsilon)\hat A_i\right).
+$$
+
+GSPO 的分析对象是 ratio 粒度。原始 verifier/RM 只评价整段 response 时，每个 token 各自的 ratio 会把细粒度 logprob 噪声注入 response-level credit。MoE 中 expert routing 变化、推理引擎与训练引擎重算 logprob 的微小差异，都会在 token ratio 上被放大；sequence-level ratio 对这类细粒度波动更宽容。
+
+#### 算法演进图
+
+| 问题对象           | 典型现象                                        | 代表方法       | 优化方向                                                                                           |
+| ------------------ | ----------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------- |
+| reward shaping     | response reward 需要 token-specific advantage   | PPO/RLHF       | 将 KL penalty 写到 token，最终 RM reward 放到末尾，用 critic/GAE 做 credit assignment              |
+| group advantage    | critic 成本高，outcome reward 只有整段分数      | GRPO/RLVR      | 同一 prompt 下多 response 组内比较，得到 response-level advantage，再复制成 token-shaped advantage |
+| loss aggregation   | 长 response 在 per-response mean 中被稀释       | DAPO, Dr. GRPO | 改 token-level denominator 或常数长度预算，降低长度偏置                                            |
+| clip object        | PPO/GRPO 的 `min` 让越界 token 失去梯度         | DAPO, CISPO    | DAPO 放宽正样本上界；CISPO 裁剪 IS weight 并保留 token 梯度                                        |
+| ratio granularity  | token ratio 高方差，长序列和 MoE routing 更脆弱 | GSPO           | 用长度归一化 sequence ratio 做 off-policy correction 和 clip                                       |
+| sampling/filtering | all-correct/all-wrong group 无可学习差异        | DAPO           | Dynamic Sampling 保留组内 reward 非平凡的 prompt                                                   |
+
+因此，后面的算法可以按这条链读：PPO 把 trust region 做成 token-level clipped surrogate，并用 critic/GAE 获得 token-specific advantage；GRPO 去掉 critic，用 response-level group advantage 简化 RLVR；DAPO/Dr. GRPO 修 loss reduction 与长度偏置；CISPO 修 token update 被 clip 丢掉的问题；GSPO 修 response-level outcome signal 与 token-level ratio 的单位错配。
 
 <a id="trpo--ppo-从约束优化到裁剪代理目标"></a>
 
-#### TRPO -> PPO：从约束优化到裁剪代理目标
+### TRPO -> PPO：从约束优化到裁剪代理目标
 
-##### 目标与约束
+#### 目标与约束
 
-TRPO 的核心问题不是“怎样让策略更新小一点”，而是“怎样在尽可能大的更新里仍然相信旧数据给出的梯度”。策略更新有两个耦合变化：动作分布 $\pi(a \mid s)$ 变了，状态访问分布 $\rho_\theta(s)$ 也会跟着变。动作分布可以用重要性采样修正，但状态分布变化很难直接修正，所以 TRPO 用 trust region 把状态分布漂移压在一个可控范围内。
-
-从 performance difference 的角度看，新策略相对旧策略的改进可以写成 advantage 的期望：
+TRPO 在平均 KL 约束内最大化旧策略分布下的新策略 surrogate objective。KL 半径控制策略分布变化，surrogate objective 决定这一步尽量沿 advantage 方向走多远：
 
 $$
-J(\theta)-J(\theta_{old})
-=
-\frac{1}{1-\gamma}
-\mathbb{E}_{s\sim d^{\pi_\theta},a\sim\pi_\theta}
-\left[A_{\theta_{old}}(s,a)\right].
-$$
-
-这个式子不能直接优化，因为 $d^{\pi_\theta}$ 依赖新策略 rollout。TRPO 的第一步是把状态分布近似固定在旧策略上，再用动作级 importance ratio 处理新旧动作分布差异：
-
-$$
-L_{\theta_{old}}(\theta)
-=
+\max_\theta
 \mathbb{E}_{s\sim\rho_{\theta_{old}},a\sim\pi_{\theta_{old}}}
 \left[
 \frac{\pi_\theta(a \mid s)}{\pi_{\theta_{old}}(a \mid s)}
@@ -798,83 +876,106 @@ A_{\theta_{old}}(s,a)
 \right]
 $$
 
-这里的 ratio 只修正 action distribution mismatch；state distribution mismatch 由 trust region 控制。理论上的 monotonic improvement bound 会用更强的 max KL 控制每个状态上的策略变化，实践中 TRPO 通常改用旧策略访问状态上的平均 KL：
-
 $$
-\max_\theta L_{\theta_{old}}(\theta)
-\quad
 \text{s.t.}\quad
-\bar D_{KL}(\theta_{old},\theta)
-=
 \mathbb{E}_{s\sim\rho_{\theta_{old}}}
 \left[
 D_{KL}\left(\pi_{\theta_{old}}(\cdot \mid s) \Vert \pi_\theta(\cdot \mid s)\right)
-\right]
-\le\delta.
+\right]\le\delta.
 $$
 
-##### 为什么用 KL 做 trust region
+#### KL 约束控制的对象
 
-策略是概率分布，不是普通参数向量。参数空间里同样长度的一步，在分布空间里可能几乎没有变化，也可能把某些动作概率推到完全不同的位置；所以用欧氏距离约束 $\theta$ 不如直接约束 $\pi_{\theta_{old}}$ 和 $\pi_\theta$ 的分布距离。
+如果只最大化 ratio-weighted advantage，策略可以把某些动作概率推得过猛，采样分布和更新后分布迅速脱节；KL trust region 把“策略还能相信这批旧 rollout 多久”变成一个约束。
 
-KL 还有一个重要角色：它控制 ratio 的极端变化。如果只看 surrogate，正 advantage 动作会被持续抬高概率，负 advantage 动作会被持续压低概率，旧 rollout 很快不再代表新策略会访问的区域。KL 约束把“这批旧 rollout 还能被重复利用多久”写成了一个可检查的条件。
+#### 实现代价与 PPO 入口
 
-实践中使用平均 KL 而不是 max KL，是理论保证和工程可解性之间的折中。max KL 更保守但难估计、难优化；平均 KL 可以直接从 batch states 上估计，也更适合和 Fisher-vector product、conjugate gradient 搭配。这个折中也是 PPO 后来把“硬约束”改成“目标函数内局部惩罚/裁剪”的入口。
-
-##### 近似求解流程
-
-TRPO 的优化对象是带约束的二次局部问题。做法是：
-
-1. 对 surrogate objective 在 $\theta_{old}$ 附近做一阶近似，得到梯度 $g$。
-2. 对平均 KL 在 $\theta_{old}$ 附近做二阶近似，得到 Hessian/Fisher matrix $A$。
-3. 用 conjugate gradient 近似解 $As=g$，得到自然梯度方向 $s\approx A^{-1}g$。
-4. 按 KL 半径缩放步长，再用 backtracking line search 检查真实 surrogate 是否改善、真实平均 KL 是否小于 $\delta$。
-
-完整推导见 [TRPO trust-region 二阶近似](#trpo-trust-region-二阶近似)。关键是：conjugate gradient 只给出“局部二次近似下的好方向”，line search 才负责把近似解拉回真实目标和真实 KL 约束。
+TRPO 的工程代价来自解约束优化：线性化 surrogate objective，二阶近似 KL，使用 Fisher-vector product 和 conjugate gradient 近似自然梯度方向，再通过 line search 确认 surrogate 变好且 KL 未越界。推导见 [TRPO trust-region 二阶近似](#trpo-trust-region-二阶近似)。
 
 ```python
     # TRPO 的核心数据对象：旧策略 rollout、旧 logprob、advantage、KL 约束半径。
     ratio = torch.exp(new_logp - old_logp)
     surrogate = (ratio * advantages).mean()
 
-    # 平均 KL 不是训练 loss 中的普通 penalty，而是本次 step 是否可接受的约束。
+    # 平均 KL 在 TRPO 中用于判定本次 step 是否留在 trust region 内。
     mean_kl = torch.distributions.kl_divergence(old_dist, new_dist).mean()
 
-    # 真实 TRPO 会用 conjugate gradient 近似求自然梯度方向，
-    # 再 backtracking line search 缩小 step，直到 surrogate 改善且 mean_kl <= target_kl。
+    # 真实 TRPO 会用 conjugate gradient 求近似自然梯度方向，
+    # 再 line search 缩小 step，直到 surrogate 改善且 mean_kl <= target_kl。
     accept_step = (surrogate > old_surrogate) and (mean_kl <= target_kl)
 ```
 
-##### 为什么 PPO 是 TRPO 的工程替代
+PPO 的 clipped surrogate 是 TRPO 思想的一阶工程替代：省掉自然梯度和 line search，把 ratio 收益限制写进目标函数。代价是失去显式约束解法；收益是普通 SGD/Adam、多 epoch minibatch 和更简单的实现。
 
-TRPO 的优点是思路很干净：surrogate 负责改进，KL 负责可信半径，自然梯度负责在分布空间里走一条合理方向，line search 负责兜底。缺点也正来自这里：Fisher-vector product、conjugate gradient、backtracking line search 让实现复杂，而且对大模型后训练的分布式训练和 minibatch 多轮更新都不友好。
-
-PPO 的 clipped surrogate 是 TRPO 思想的一阶工程替代：不再显式求自然梯度和 line search，而是在目标函数里直接限制 ratio 的收益。它牺牲了 TRPO 的显式约束解法，换来普通 SGD/Adam、多 epoch minibatch 和更简单的实现。
-
-这条关系也是理解后续 GRPO/DAPO/CISPO/GSPO 的入口：它们都在问同一个问题，旧策略采样得到的数据，更新几轮以后还能不能继续提供可信梯度；分歧只是“限制 token ratio、sequence ratio、IS 权重，还是直接 mask token”。
-
-参考：[TRPO 原文](https://arxiv.org/abs/1502.05477)、[动手学强化学习 TRPO 章节](https://hrl.boyuai.com/chapter/2/trpo%E7%AE%97%E6%B3%95#113-%E8%BF%91%E4%BC%BC%E6%B1%82%E8%A7%A3)、[TRPO 深度拆解](https://yam.gift/2026/05/11/NLP/LLM-Training/2026-05-11-TRPO/)。
+这条关系也是理解后续 GRPO/DAPO/CISPO/GSPO 的入口：旧策略采样的数据在多轮更新后还保留多少可信梯度。后续方法分别选择限制 token ratio、sequence ratio、IS 权重或 token update mask。
 
 <a id="proximal-policy-optimization-ppo"></a>
 
-#### Proximal Policy Optimization (PPO)
+### Proximal Policy Optimization (PPO)
 
-##### 目标函数：非 LLM 简化版本
-
-$$
-J_{PPO}(\theta) = \mathbb{E}[\min(r_t(\theta) A_t, clip(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t)] \\
-r_t(\theta) = \frac{\pi_{\theta}(a \mid s)}{\pi_{old}(a \mid s)} = \exp(\log\pi_{\theta}(a \mid s) - \log\pi_{old}(a \mid s))
-$$
-
-##### 目标函数：LLM token-level 版本
+#### 目标函数：非 LLM 简化版本
 
 $$
-J_{PPO}(\theta) = \mathbb{E}_{q\sim \mathcal{D},o_i\sim \pi_{old}(\cdot \mid q)}[\frac{1}{\lvert o_i\rvert}\sum_{t=1}^{\lvert o_i\rvert}\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]
+\begin{aligned}
+J_{PPO}(\theta)
+&= \mathbb{E}\left[
+\min\left(r_t(\theta) A_t,\mathrm{clip}(r_t(\theta),1-\epsilon,1+\epsilon)A_t\right)
+\right],\\
+r_t(\theta)
+&=
+\frac{\pi_{\theta}(a \mid s)}{\pi_{old}(a \mid s)}
+= \exp(\log\pi_{\theta}(a \mid s)-\log\pi_{old}(a \mid s)).
+\end{aligned}
 $$
 
-其中 $o$ 代表模型生成的一条序列， $o_i$ 代表第 $i$ 条序列， $o_{i,t}$ 代表第 $i$ 条序列的第 $t$ 个 token。先对一条序列的每个 token 计算优势并累加，再除以序列长度进行归一化，这是防止长序列优势累加过大，在优化时过度重视长序列。
+#### 目标函数：LLM token-level 版本
 
-##### Token 级对象
+RLHF 的全局目标常写成 reward 减 KL：
+
+$$
+\mathcal{J}_{RLHF}(\theta)=
+\mathbb{E}_{x,y\sim\pi_\theta}
+\left[
+R(x,y)
+-\beta D_{KL}(\pi_\theta(\cdot \mid x)\Vert\pi_{ref}(\cdot \mid x))
+\right].
+$$
+
+PPO 实现里经常先把这项展开成逐 token shaped reward。对第 $i$ 条 response：
+
+$$
+r_{i,t}^{shaped} =
+\begin{cases}
+-\beta\left(\log\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})-\log\pi_{ref}(o_{i,t} \mid q,o_{i,\lt t})\right),& t\lt \lvert o_i\rvert\\
+R(q,o_i)-\beta\left(\log\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})-\log\pi_{ref}(o_{i,t} \mid q,o_{i,\lt t})\right),& t=\lvert o_i\rvert
+\end{cases}
+$$
+
+这里使用的是 sampled log-ratio KL penalty。若把当前策略记为采样分布 $q$、reference policy 记为 $p$，并定义 $\delta=p/q$，则每个 token 上的 KL penalty 对应 $-\log\delta$，也就是 k1 estimator。它简单、直接，但单样本值可以为负，方差也高于 k3；PPO/RLHF 中它通常先作为 reward shaping 信号参与 GAE，actor 更新阶段主要通过固定 advantage 与 PPO ratio 接收这部分影响。
+
+然后用 value model 和 GAE 得到 token-specific advantage：
+
+$$
+\hat A_{i,t}^{GAE} =
+\sum_{k=0}^{\lvert o_i\rvert-t}(\gamma\lambda)^k
+\left(r_{i,t+k}^{shaped}+\gamma V_\phi(s_{i,t+k+1})-V_\phi(s_{i,t+k})\right).
+$$
+
+PPO 的 token-level clipped surrogate 再使用这个 advantage：
+
+$$
+J_{PPO}(\theta) =
+\mathbb{E}_{q\sim \mathcal{D},o_i\sim \pi_{old}(\cdot \mid q)}
+\left[
+\frac{1}{\lvert o_i\rvert}\sum_{t=1}^{\lvert o_i\rvert}
+\min\left(r_{i,t}\hat A_{i,t},
+\mathrm{clip}(r_{i,t},1-\epsilon,1+\epsilon)\hat A_{i,t}\right)
+\right]
+$$
+
+其中 $o$ 代表模型生成的一条序列， $o_i$ 代表第 $i$ 条序列， $o_{i,t}$ 代表第 $i$ 条序列的第 $t$ 个 token。这个写法先对一条序列内部 token 求平均，再对样本求平均；它能避免完整 sequence logprob 乘积让长序列天然占优，但当奖励主要是整段 outcome reward 时，也会带来长 response 的单 token 梯度被稀释的问题。这里的 KL 已经通过 shaped reward 进入 $\hat A_{i,t}^{GAE}$，因此它影响的是 advantage 和 value target。
+
+#### 粒度与实现对象
 
 Token 级优势和 ratio 分别是：
 
@@ -882,14 +983,14 @@ $$
 \hat A_{i,t} \quad\text{and}\quad r_{i,t} = \frac{\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})} {\pi_{old}(o_{i,t} \mid q,o_{i,\lt t})}.
 $$
 
-$\hat A_{i,t}$ 由奖励模型与批判模型共同计算，衡量第 $t$ 个 token 对最终回报的贡献差异； $r_{i,t}\gt1$ 表示新策略相对旧策略更倾向于输出该 token，反之则说明新策略正在降低该 token 的概率。
+PPO 在 LLM-RLHF 中同时包含三种粒度：reward model 输出 response-level scalar reward；KL penalty 按 token 写入 shaped reward，并通过 value model/GAE 生成 token-specific advantage；policy loss 使用 token-level ratio 和 token-level clip，工程上常用 per-response mean 做 loss reduction。`r_{i,t} > 1` 表示新策略相对旧策略更倾向于输出该 token，反之则说明新策略正在降低该 token 的概率。
 
 ```python
     # old_logp 是 rollout 采样时旧策略给动作/token 的 log probability。
     # new_logp 是当前正在更新的策略重新评估同一批动作/token 得到的 log probability。
     ratio = torch.exp(new_logp - old_logp)
 
-    # advantage 的正负决定 clip 真正限制哪一边：
+    # advantage 的正负决定 clip 限制哪一边：
     # A > 0 时，ratio 过大代表把好动作推得太猛，上界会被截住；
     # A < 0 时，ratio 过小代表把坏动作压得太猛，下界会被截住。
     clipped_ratio = ratio.clamp(1.0 - clip_eps, 1.0 + clip_eps)
@@ -901,120 +1002,132 @@ $\hat A_{i,t}$ 由奖励模型与批判模型共同计算，衡量第 $t$ 个 to
     policy_loss = (policy_loss * action_or_token_mask).sum() / action_or_token_mask.sum()
 ```
 
-##### Clip 与 Token-Masking
+#### Clip 与 Token-Masking
 
-动机：将 current policy 中 prob 偏离 old policy 太远的 token mask 掉，确保每次更新不会“迈太大的步子”，从而避免训练崩溃。
+PPO 的 `min` 产生 advantage-sign-dependent 的单边裁剪。主线里只需要记住四个区域；完整梯度符号推导见 [PPO clip 单边裁剪梯度符号](#ppo-clip-单边裁剪梯度符号)。
 
-为什么是单边裁剪机制？
+| advantage | ratio 区域 | `min` 选择   | 梯度行为                             |
+| --------- | ---------- | ------------ | ------------------------------------ |
+| 正        | 高于上界   | clipped 项   | 截断继续增大好 token 概率的梯度      |
+| 正        | 低于下界   | unclipped 项 | 保留梯度，把好 token 的 ratio 往上拉 |
+| 负        | 低于下界   | clipped 项   | 截断继续降低坏 token 概率的梯度      |
+| 负        | 高于上界   | unclipped 项 | 保留梯度，把坏 token 的 ratio 往下拉 |
 
-- 场景一：优势 $A \gt 0$。当更新方向（即奖励方向）与优势方向相同，且超过 clip 上界时，认为本次更新方向正确但过于激烈， $min$ 选择了 clip 项，其对 $\theta$ 来说是一个常数，等同于直接去掉梯度不参与本次训练更新；当方向相反，且超过 clip 下界时，认为此时更新方向错误，需要大的惩罚修正更新方向， $min$ 使得忽略 clip，使用错误更新方向带来的大的惩罚梯度参与本次训练更新；所以 $A \gt 0$ 时单边裁剪的对象是 "Higher Area"。
-- 场景二：优势 $A \lt 0$。当更新方向（即奖励方向）与优势方向相同，且超过 clip 下界时，认为本次更新方向正确但过于激烈， $min$ 选择了 clip 项，其对 $\theta$ 来说是一个常数，等同于直接去掉梯度不参与本次训练更新；当方向相反，且超过 clip 上界时，认为此时更新方向错误，需要大的惩罚修正更新方向， $min$ 使得忽略 clip，使用错误更新方向带来的大的惩罚梯度参与本次训练更新；所以 $A \lt 0$ 时单边裁剪的对象是 "Lower Area"。
+这个表解释了 PPO clip 的单边性：沿 advantage 方向走太远时截断梯度；逆着 advantage 方向走太远时保留梯度，让 loss 把 ratio 拉回去。
 
-actor objective 为什么要有 $\min$? 在更新方向（即奖励方向）与优势方向不同时，忽略 clip 的限制使用更大的惩罚让目标回到正轨：
+#### Dual Clip
 
-1. $A_t \gt 0, r_t \lt 1 - \epsilon$, $J(\theta) = r_t A_t$, not $(1 - \epsilon)A_t$ by clip
-2. $A_t \lt 0, r_t \gt 1 + \epsilon$, $J(\theta) = r_t A_t$, not $(1 + \epsilon)A_t$ by clip
-
-##### Dual Clip
-
-当更新方向与优势方向相反时，在 $A \lt 0$ 场景下，当 $\pi_{old}$ 很小而 $\pi_\theta$ 很大时，导致 $\frac{\pi_\theta}{\pi_{old}}$ 很大，巨大的权重会主导整个估计，导致方差爆炸，同样会影响训练的稳定性。直接把这部分 token 也 mask 掉不合理，所以具体实现时对这部分规定 loss 上限。
+当更新方向与优势方向相反时，若 advantage 为负、旧策略概率很小且新策略概率很大，ratio 会急剧增大，让少数 token 主导梯度估计并放大方差。Dual Clip 对这类惩罚项设置 loss 上限，避免简单 mask 带来的训练信号损失。
 
 参考：https://zhuanlan.zhihu.com/p/1950988412405417622
 
-##### GAE 与 advantage
+#### GAE 与 advantage
 
-GAE 本质上是 one-step TD error 和 MC 之间的平滑插值， $\lambda$ 平衡偏差与方差：
+GAE 是 one-step TD error 和 MC return 之间的平滑插值， $\lambda$ 控制偏差与方差：
 
 - $\lambda = 0$, $A_t = \sum_{k=0}^{\infty} 0^{k} \delta_{t+k} = \delta_t$, $\delta_t = r_t + V(s_{t+1}) - V(s_t)$ is one-step TD，低方差高偏差
 - $\lambda = 1$, $A_t = \sum_{k=0}^{\infty} \gamma^{k} \delta_{t+k} = G_t - v(s_t)$, this can be proved by sum over $\delta_{t}$ expansion，低偏差、高方差
 - $0\lt\lambda\lt1$, as $\lambda$ increase, 指数衰减的权重 $(\gamma \lambda)^{k}$ 让远处的 TD Error 贡献逐渐减小
 
-##### 多轮更新与重要性采样
+#### 多轮更新与重要性采样
 
-动机：消除采样策略(old policy)和当前策略的分布差异，保证回报期望计算的准确性，以使模型可以在同一份采样数据上进行多轮优化更新，提高采样数据的使用效率。
+多轮更新的对象是同一批旧策略 rollout。每一轮参数更新都会拉开当前策略和采样策略的距离，因此需要 importance ratio 校正，并用 clip 控制方差和策略漂移。
 
 - on-policy or off-policy：PPO 算法整体属于 on-policy，但更新过程有 off-policy 的成分。
 - 采样：on-policy rollout，每个输出都是根据当前 policy 生成的。
 - 计算 log_prob：用当前 policy 和 ref policy 计算 log prob，然后计算权重 r。
 - 多轮 actor 更新：每一轮更新后 policy 会变，但数据依然是一开始采样的。新策略在学旧策略生成的数据，产生 off-policy 成分，因此需要用重要性采样比值 $r_t(\theta)=\pi_\theta/\pi_{old}$ 做校正，并用 clip 限制校正后方差和策略漂移。
 
-##### 非 LLM PPO 实现流程
+#### 非 LLM PPO 实现流程
 
-for each episode, implement below:
+非 LLM PPO 的数据流可以压缩成四步：
 
-1. collect a rollout:
-
-   $$
-   \lbrace s_t, a_t, \pi_\theta(a_t \mid s_t), s_{t+1}\rbrace
-   $$
-
-   for a given number of steps, 行为策略 $\pi_\theta$ update after each episode
-
-2. compute Generalized Advantage Estimation (GAE) and return
-
-   - TD error $\delta_t = r_t + \gamma v(s_{t+1}) - v(s_t)$
-   - Advantage $A_t = \sum_{k=0}^{\infty} (\gamma \lambda)^{k} \delta_{t+k}$，等价于递推关系 $A_t = \delta_t + (\gamma \lambda)A_{t+1}$, implemented in reverse order in practice, 需要归一化提高训练稳定性
-   - return $q(s_t,a_t) = A(s_t,a_t) + v(s_t)$, target for value
-
-3. for each ppo epoch (model update after each epoch)
-
-   - 用新策略评估旧数据 evaluate rollout by updated model, 得到 $\pi_\theta(a_t \mid s_t), v_\theta(s_t), H(\theta)$
-   - 计算 ppo clip loss
-   - $r_t(\theta) = \frac{\pi_{\theta}(a_t \mid s_t)}{\pi_{old}(a_t \mid s_t)} = \exp(\log\pi_{\theta}(a_t \mid s_t) - \log\pi_{old}(a_t \mid s_t))$
-   - policy loss $-\min(r_t(\theta)A_t, clip(r_t(\theta), 1-\epsilon, 1+\epsilon)A_t)$
-   - value loss $(v_\theta(s_t) - q(s_t,a_t))^{2}$
-   - entropy bonus $H(\pi_\theta) = -\mathbb{E}[\sum_a \pi_\theta(a \mid s_t)\log\pi_\theta(a \mid s_t)]$
-   - total loss = policy loss + value loss - entropy bonus
-   - 总结：同一批经验不要只用一次，可以多学几轮；但是每学一轮都要检查新策略相对旧策略变了多少。如果变化还小，就继续学习；如果某些动作的概率被推得太高或压得太低，就把这部分更新截住
-   - 参考：https://zhuanlan.zhihu.com/p/614115887
+1. 用旧策略采样 rollout，保存 action、old logprob、reward 和 value。
+2. 用 TD error 反向递推 GAE，得到 advantage 和 value target。
+3. 多个 PPO epoch 内反复重算 new logprob/value/entropy，并用 ratio 与 clip 计算 policy loss。
+4. 同时优化 policy loss、value loss 和 entropy bonus；每轮都监控 KL、clip fraction 和 advantage scale。
 
 <a id="grpo-from-deepseekmath"></a>
 
-#### GRPO (from DeepSeekMath)
+### GRPO (from DeepSeekMath)
 
-##### 目标与对象定义
+#### 目标与对象定义
 
 - 对于模型 $\pi_\theta$ 给定一个问题 $q$ 采样多个回答 $\lbrace o_i \rbrace_{i=1}^{G}$， $G$ 是 group 数量，每个回答有不同的长度 $\lvert o_i\rvert$
 - $\pi_\theta(o_{i,t} \mid q, o_{i,\lt t})$ 是在 $q$ 的采样解答 $o_{i,t}$ 解码的第 $t$ 个词元的策略概率
-- KL 约束 $\pi_\theta$ 和 $\pi_{ref}$ 分布差异，使用 k3 估计（无偏 & 方差小）
+- KL 约束 $\pi_\theta$ 和 $\pi_{ref}$ 分布差异，使用 k3 estimator 作为 token-level regularizer
 
-##### K3 estimator
-
-$$
-D_{KL}[\pi_\theta \Vert \pi_{ref}] = \frac{\pi_{ref}(o_{i,t} \mid q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t} \mid q,o_{i,\lt t})} - \log \frac{\pi_{ref}(o_{i,t} \mid q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t} \mid q,o_{i,\lt t})} - 1
-$$
-
-##### Group relative advantage
-
-相较于 PPO 去掉了价值模型，将 Advantage 定义为相对于组中其他响应的输出奖励。 $\hat{A}_{i,t}$ 是组的相对优势，一条采样回答中的每个 token 的优势都是一样的（token level）。
+#### K3 estimator
 
 $$
-\hat{A}_{i,t} = \frac{r_i - mean(\lbrace R_k \rbrace_{k=1}^{G})}{std(\lbrace R_k \rbrace_{k=1}^{G})}
+\hat D_{KL}^{i,t} = \frac{\pi_{ref}(o_{i,t} \mid q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t} \mid q,o_{i,\lt t})} - \log \frac{\pi_{ref}(o_{i,t} \mid q, o_{i,\lt t})}{\pi_{\theta}(o_{i,t} \mid q,o_{i,\lt t})} - 1.
 $$
 
+这个式子对应 k3：若当前策略是采样分布 $q$，reference policy 是 $p$，并定义 $\delta=p/q$，则 k3 为 $\delta-1-\log\delta$。它保持无偏估计，同时比 k1 更稳定，并且单样本非负。GRPO 把它作为 token-level regularizer：每个 token 上独立计算，数值通常随 $t$ 改变；它不进入 response reward 的组内归一化，也不生成 GRPO 的 group advantage。
+
+#### Group relative advantage
+
+GRPO 相较于 PPO 的核心简化是去掉 value model。它对同一个 prompt $q$ 采样 $G$ 条回答 $o_1,\dots,o_G$，用 reward model 或 rule-based verifier 给每条回答一个 response-level reward $R_i=R(q,o_i)$，再做组内标准化：
+
 $$
-\mathcal{L}_{GRPO}(\theta) = \mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot \mid q)}[\frac{1}{G} \sum_{i=1}^{G} \frac{1}{\lvert o_i\rvert} \sum_{t=1}^{\lvert o_i\rvert}[\min(r_{i,t}\hat{A}_{i,t}, clip(r_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_{i,t}) - \beta D_{KL}(\pi_\theta \Vert \pi_{ref})]]
+\hat A_i =
+\frac{R_i-\frac{1}{G}\sum_{k=1}^{G}R_k}
+{\sqrt{\frac{1}{G}\sum_{k=1}^{G}\left(R_k-\frac{1}{G}\sum_{j=1}^{G}R_j\right)^2}+\epsilon}.
 $$
 
-##### 与 PPO 的差异
+在实现中，这个 response-level advantage 会复制到第 $i$ 条 response 的每个 token，形成 token-shaped advantage tensor：
 
-差异点：PPO 需要价值网络计算 Advantage；GRPO 去掉了价值模型，将 Advantage 定义为相对于组中其他响应的输出奖励。
+$$
+\hat A_{i,t}=\hat A_i,\quad t=1,\dots,\lvert o_i\rvert.
+$$
 
-共同的问题：PPO/GRPO 损失函数中的不当裁剪操作对性能有负面影响，不能有效促进 CoT 推理行为出现。具体来说，与反思行为相关的 token 通常是推理路径中的“分叉点”，在 Base 模型中出现频率低，且被赋予较低的概率。这些 token 往往具备较高的重要性采样权重 $r$，因此在第一次 on-policy 更新后就会被裁剪掉，无法参与后续的 off-policy 梯度更新。然而，这些低概率 token 往往对于稳定熵以及促进可扩展的强化学习至关重要（之后的 DAPO 尝试通过提高裁剪上界来缓解，CISPO 尝试设计明确避免丢弃 token，对较大更新的 token 通过内在机制将熵控制在合理范围）。
+这个 broadcast 只把 response-level 方向铺到 token-level policy loss 上。GRPO 的 advantage tensor 可以写成 $\hat A_{i,t}$，但对固定的 $i$，它通常不随 $t$ 改变；ratio 和 clip 是 token-level，loss reduction 常是 per-response mean。
 
-##### Loss 现象分析
+因此 GRPO 的目标里同时存在两类 token-level 对象：policy surrogate 使用广播后的 $\hat A_{i,t}=\hat A_i$，同一条 response 内 advantage 值相同；KL regularizer 使用 $\hat D_{KL}^{i,t}$，它按 token 计算，通常不相同。把二者分开看，才能避免把“GRPO 无 critic、advantage 广播”误读成“GRPO 的 token loss 每个位置都一样”。
 
-训练 GRPO 的 Loss 为什么会有负值并且会上升？
+#### 目标函数与粒度
 
-- 观察：当 $\min(\cdot) \gt KL \gt 0$ 时，损失为负数，由于 ratio 恒为正，所以要求优势 $\hat{A}_{i,t} \gt 0$
-- 分析：当组 reward 的方差较大时，便容易出现较大的 $\hat{A}_{i,t}$，或者是 ratio 有较大的变化值时，都可能使得 $\min(\cdot) \gt KL \gt 0$
-- 回答：GRPO损失不保证为正数（如组 reward 的方差较大时）。训练过程优化策略远离ref，因为KL约束会产生较大的损失变化导致大梯度，Loss会上升
+GRPO 的 token ratio 是：
 
-##### 实现流程
+$$
+r_{i,t}(\theta)=
+\frac{\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})}
+{\pi_{\theta_{old}}(o_{i,t} \mid q,o_{i,\lt t})}.
+$$
 
-- **Step 1: sample grouped responses.** 对每个 prompt 在线采样多个回答，得到一组样本 (batch)：$x_j \rightarrow \lbrace y_{j,1}, \dots, y_{j,G}\rbrace$, where $x_j$ is $j$-th prompt, $G$ is group size, $y_{j,i}$ is $i$-th response under $j$-th prompt。
-- **Step 2: compute rewards.** 计算对应奖励 $r_{j,i} = R(x_j, y_{j,i})$（对于 GSM8K 数据集，每道题都有明确的数值答案，不需要训练任何 RM，直接用规则判断。RLVR 核心思想：可验证奖励）。
-- **Step 3: normalize group-relative advantages.** 计算组内均值、标准差和 response-level advantage：
+带 KL penalty 的 clipped objective 常写成：
+
+$$
+J_{\text{GRPO}}(\theta)=
+\mathbb{E}
+\left[
+\frac{1}{G}\sum_{i=1}^{G}\frac{1}{\lvert o_i\rvert}
+\sum_{t=1}^{\lvert o_i\rvert}
+\left(
+\min\left(r_{i,t}\hat A_i,
+\mathrm{clip}(r_{i,t},1-\epsilon,1+\epsilon)\hat A_i\right)
+-\beta \hat D_{KL}^{i,t}
+\right)
+\right].
+$$
+
+看这个式子的求和就能定位三个问题：
+
+1. $\hat A_i$ 不随 $t$ 变化，因此同一 response 内没有细粒度 credit assignment。
+2. $r_{i,t}$ 随 $t$ 变化，因此 off-policy correction 和 clip 在 token 粒度发生。
+3. 每条 response 前有 $1/\lvert o_i\rvert$，因此长 response 在样本等权聚合中被稀释。
+
+#### 与 PPO 的差异
+
+PPO 用 critic/GAE 给每个 token/prefix 估计通常随位置变化的 $\hat A_{i,t}$；GRPO 用组内 reward 相对值替代 critic，降低训练成本，也更适合 RLVR 这种 outcome verifier 场景。代价是：如果一组回答全对或全错，组内方差接近 0，advantage 消失；如果回答很长，同一个 response-level advantage 会被许多无关 token 共享；如果 token ratio 波动很大，clip fraction 会迅速升高。
+
+PPO/GRPO 的共同风险在 clip 机制。与反思、搜索或关键推理转折相关的 token 可能在 base model 中概率很低；一旦这些 token 获得正 advantage，ratio 很容易越过上界，PPO/GRPO 的 `min` 会让它们在有利方向上不再继续贡献梯度。DAPO 用 Clip-Higher 放宽正向上界，CISPO 改成 clipped IS-weight 以保留越界 token 的 $\log\pi_\theta$ 梯度。
+
+#### 实现流程
+
+1. 对每个 prompt 在线采样多个回答，得到一组样本 (batch) : $x_j \rightarrow \lbrace y_{j,1}, \dots, y_{j,G}\rbrace$, where $x_j$ is $j$-th prompt, , $G$ is group size, $y_{j,i}$ is $i$-th response under $j$-th prompt，
+2. 计算对应奖励 $r_{j,i} = R(x_j, y_{j,i})$。对于 GSM8K 这类数据集，每道题都有明确数值答案，可用规则 verifier 判断答案正确性；这就是 RLVR 中可验证奖励的典型来源。
+3. 计算组内均值、标准差和 response-level advantage：
 
 $$
 \begin{aligned}
@@ -1027,29 +1140,10 @@ $$
 如果标准差 $s_j\approx 0$，说明这组回答暂时没有可学习的差异，需设置 $\hat A_{j,i}=0$。做组内归一化有效的原因：
 
 - 难度归一化：不同题目的难度不同。简单题所有回答都正确（奖励均值很高），难题大部分回答都错误（奖励均值很低）。如果用绝对奖励，简单题的回答会获得更高的梯度信号，模型会把大部分精力花在简单题上。组内归一化消除了这种偏差，它只关注"这道题内部谁更好"，不受题目绝对难度的影响。
-- 相对比较更稳定：人类偏好本质上也是比较式的（"A 比 B 好"），不是绝对的（"A 得 87 分"）。GRPO 的组内比较和人类的判断方式天然一致。
+- 相对比较更稳定：人类偏好标注通常采用成对比较（"A 比 B 好"），而非绝对分数（"A 得 87 分"）。GRPO 的组内比较沿用了这种相对评价形式。
 - 方差更低：同一组内的回答共享相同的 prompt，唯一的差异是模型生成的随机性。这种"控制变量"式的比较比跨样本的绝对评分更稳定。
 
-- **Step 4: optimize the GRPO training loss.**
-
-$$
-\mathcal{L} = -J_{\text{GRPO}}^{\text{clip}}(\theta) +\beta_{KL}\hat D_{KL}
-$$
-
-- Policy loss:
-
-$$
-J_{\text{GRPO}}^{\text{clip}}(\theta) = \mathbb{E}_{j,i} \left[ \min\left( \rho_{j,i}(\theta)\hat A_{j,i}, \mathrm{clip}(\rho_{j,i}(\theta),1-\epsilon,1+\epsilon)\hat A_{j,i} \right) \right]
-$$
-
-- 新旧策略的概率比值:
-
-$$
-\rho_{j,i}(\theta) = \frac{\pi_\theta(y_{j,i} \mid x_j)} {\pi_{old}(y_{j,i} \mid x_j)} = \exp\left( \log\pi_\theta(y_{j,i} \mid x_j)-\log\pi_{old}(y_{j,i} \mid x_j) \right)
-$$
-
-- PPO 的裁剪机制 advantages $\hat{A}_{j,i}$ 来自组内比较，替代 Critic (PPO)
-- GRPO uses the k3 estimator for KL divergence:
+4. 用 token-level ratio 计算 clipped surrogate，并用 k3 estimator 计算 token KL：
 
 $$
 \hat D_{KL} = \exp(\Delta)-\Delta-1, \quad \Delta=\log\pi_{ref}(y \mid x)-\log\pi_\theta(y \mid x).
@@ -1062,7 +1156,7 @@ $$
         response_adv = (rewards - group_mean) / group_std
 
         # response_mask: [num_prompts * group_size, max_response_len]，只统计回答 token。
-        # GRPO 的 advantage 是 response-level，同一条 response 内所有 token 共享同一个优势。
+        # GRPO 的 advantage tensor 带 token 维度，但同一条 response 内所有 token 共享同一个数值。
         adv_tokens = response_adv.reshape(-1, 1).expand_as(response_mask)
 
         token_ratio = torch.exp(new_token_logp - old_token_logp)
@@ -1080,19 +1174,23 @@ $$
         grpo_loss = -(per_response_objective - beta_kl * per_response_kl).mean()
 ```
 
-##### 实际问题
+#### 实际问题与后续算法入口
 
-- Response-Level 的 Advantage：对同一提示（prompt）采样多个响应/回答（response），再计算该组响应内的标准化得分，并将其作为该响应中所有 token 的统一 Advantage。也就是说，GRPO 中同一响应内的所有 token 共享相同的 Advantage，不存在区分性
-- loss 计算方式是：先在每个样本内按 Token 对损失进行平均，然后在样本之间聚合损失，即每个样本在最终损失计算中被分配相同的权重（每个样本对 Loss 等权），这会导致较长回复中的 Token 可能对总体损失的贡献较低（影响被长样本稀释），所以就可能导致高质量的长样本学习的较差，而低质量的长文本又无法得到惩罚
-- token-level 的 importance sampling，即对每个 token 分别乘以其对应的重要性权重以进行分布校正，可能导致方差大
-- 参考
-- https://huggingface.co/blog/NormalUhr/grpo-to-dapo-and-gspo
+GRPO 留下三条后续路线：
+
+1. **长度与 loss reduction。** Per-response mean 让每条 response 等权，长 response 的 token 贡献被 $1/\lvert o_i\rvert$ 稀释。DAPO 和 Dr. GRPO 都从这里切入。
+2. **clip 与 token gradient。** PPO/GRPO 的 `min` 会让有利方向越界 token 失去梯度。DAPO 通过 Clip-Higher 缓解，CISPO 直接改变裁剪对象。
+3. **ratio 粒度。** GRPO 对每个 token 做 importance ratio，而 reward/advantage 是整条 response 的 outcome 信号。GSPO 从这里切入，把 ratio 和 clip 提升到 sequence level。
+
+训练 GRPO 时 loss 可以为负，也可以在训练中上升。原因是实现通常最小化 $-J+\beta\hat D_{KL}$；当正 advantage 的 clipped objective 大于 KL penalty 时，loss 为负。随着策略远离 reference，KL penalty 或 clip fraction 上升，loss 变大并不必然表示 reward 下降，必须同时看 reward、response length、KL、clip fraction、all-correct/all-wrong group 比例和评测分数。
 
 <a id="dapo-seed-2025"></a>
 
-#### DAPO (Seed, 2025)
+### DAPO (Seed, 2025)
 
-##### 目标函数
+#### 目标函数
+
+DAPO 的目标可以看成在 GRPO 基础上同时改四个对象：clip 上下界、prompt 采样、loss reduction 和过长样本 reward shaping。去掉显式 KL penalty 后，它优化：
 
 $$
 \mathcal{L}_{DAPO}(\theta) = -\mathbb{E}_{q,a\sim\mathcal{D},\lbrace o_i \rbrace_{i=1}^{G}\sim\pi_{\theta_{old}}(\cdot \mid q)}
@@ -1115,7 +1213,7 @@ $$
     token_objective = torch.minimum(token_ratio * adv_tokens, clipped_ratio * adv_tokens)
 
     # response_mask 的 1 表示真实回答 token，0 表示 padding 或 prompt token。
-    # 与 GRPO 的 per-response average 不同，这里直接按 token 总数归一化。
+    # DAPO 使用 token 总数归一化，长 response 的 token 不再被 response 内平均稀释。
     dapo_loss = -(token_objective * response_mask).sum() / response_mask.sum().clamp_min(1)
 ```
 
@@ -1125,49 +1223,126 @@ $$
 0 \lt \lvert\lbrace o_i \mid \text{equivalent}(a, o_i)\rbrace\rvert \lt G
 $$
 
-##### 关键改动
+#### 关键改动
 
-DAPO 的优化角度可以拆成四个分支：Clip-Higher、动态采样、token-level policy gradient loss、Overlong Reward Shaping。
+DAPO 分别处理 GRPO 的四个失真点：低概率好 token 被上界过早截断、全对/全错 prompt 没有梯度、长 response 的 token 被样本均值稀释、硬截断导致 reward noise。
 
-##### Clip-Higher
+#### Clip-Higher
 
-动机：使用 PPO 或 GRPO 训练时观察到的熵坍缩现象，就是 Policy 的熵迅速下降，导致某些组生成的结果几乎相同，限制了探索。分析：原有的上限截断阈值在一定程度上限制了低概率（但有潜力） token 的概率提升，从而可能抑制模型生成的多样性
+PPO/GRPO 的默认 clip range 常是 $[1-\epsilon,1+\epsilon]$。如果旧策略下一个探索 token 的概率很低，即使 ratio 允许乘到 $1+\epsilon$，绝对概率提升仍很有限；高概率 token 的绝对概率提升更容易显著。结果是已有高概率模式继续被强化，低概率但可能带来高奖励的推理转折缺少上升空间。
 
-- 如何理解抑制低概率 token 的增长和抑制模型多样性？以 $\epsilon=0.2$ 为例，低概率 token 的有效变化范围（即不会被 clip 影响）很小，这是因为对于同样的 clip range，高概率 token 的有效变化范围被大的概率放大了。模型更倾向于维持原有的高概率Token（高概率Token更容易保持高概率或继续增加），而不是探索新的Token，导致生成的内容缺乏多样性。
-- 方案：仅对正样本，增大 clip 的上限（clip higher = 0.28），而负样本的 clip 区间保持不变，为低概率 token 的概率提升释放了更多空间
-- 为什么主要放宽正样本上界：DAPO 想保护“低概率但高奖励”的探索 token，让它们能继续上升；负样本对应的是降低概率，继续放宽下界会加强惩罚和分布漂移，对保持熵与稳定性未必有同样收益。
+DAPO 把上下界解耦：
 
-##### Dynamic Sampling
+$$
+\mathrm{clip}(r_{i,t},1-\epsilon_{low},1+\epsilon_{high}),
+\quad
+\epsilon_{high}\gt\epsilon_{low}.
+$$
 
-动机：当某些提示词 Acc 等于1时的梯度消失问题。因为 Acc 为1时，GRPO一组输出的 Reward 都是1，Advantage等于0，此时 Policy 没有优化，因此降低了样本效率。根据经验，精度等于1的样本数量会在训练过程中持续增加
+上界放宽主要服务于正 advantage token：它允许低概率但高奖励的 token 在多轮 minibatch 更新里继续上升。下界不对称放宽，是因为负 advantage token 对应降低概率；过度放宽下界会更强地压缩采样空间，增加分布漂移和熵坍缩风险。
 
-- 方案：使用过采样并过滤掉准确度等于1和0的提示词，目标中的 equivalent 的意思是样本是等效的（过滤掉无效的）。具体做法是：在训练前持续采样，直到批次被准确率既不为 0 也不为 1 的样本完全填充
+#### Dynamic Sampling
 
-##### Token-Level Policy Gradient Loss
+当某个 prompt 的 $G$ 条回答全对或全错时，组内 reward 没有差异，response-level advantage 全部接近 0。训练继续把这类 prompt 放进 batch，会让有效梯度样本数下降、梯度方差上升。
 
-动机：GRPO loss 计算方式是：先在每个样本内按 Token 对损失进行平均，然后在样本之间聚合损失，即每个样本在最终损失计算中被分配相同的权重（每个样本对 Loss 等权），这会导致较长回复中的 Token 可能对总体损失的贡献较低（影响被长样本稀释），所以就可能导致高质量的长样本学习的较差，而低质量的长文本又无法得到惩罚
+DAPO 的动态采样使用过采样和过滤，只保留组内准确率既不为 0 也不为 1 的 prompt：
 
-- 方案：DAPO loss 计算方式是：直接对所有 token 级别做均值计算，使得较长的序列（相比短的）对整体Loss的影响更大。此外，从单个Token的角度来看，如果某种特定的生成模式能够导致奖励的增加或减少，那么无论该模式出现在多长的回复中，它都会被同等地促进或抑制
+$$
+0 \lt \sum_{i=1}^{G}\mathbb{1}[R(q,o_i)=1] \lt G.
+$$
 
-##### Overlong Reward Shaping
+这一步处理 sampling/filtering 粒度问题。保留下来的 prompt group 都有可比较的正负样本，group advantage 才有学习信号。
 
-动机：GRPO 训练中常见的一个工程问题：回答长度失控。模型可能学会"写得越多越好"（因为更长的回答更容易包含正确推理），导致生成 2000+ token 的冗长回答。GRPO 的原始做法是设定最大长度，超过就截断并给惩罚。但截断是硬边界，回答 499 token 没事，501 token 就被惩罚，梯度信号不连续。截断样本的不当奖励塑造（一般提取不到答案，所以Reward为-1）会引入奖励噪声，并严重扰乱训练过程。因为一个合理的推理过程可能仅因长度过长而受到惩罚，使模型对其推理过程的有效性产生困惑
+#### Token-Level Policy Gradient Loss
 
-- 方案：DAPO 提出了一种基于长度的惩罚机制——软过长惩罚（Soft Overlong Punishment），用一个平滑的长度惩罚函数替代硬截断，让模型自然地学会控制回答长度。具体来说，当响应长度超过预设的最大值时，定义一个惩罚区间。在区间内，响应越长，受到的惩罚越大。该惩罚将被添加到原始的基于规则的正确性奖励中，从而引导模型避免生成过长的响应。论文中，预期的最大长度设为 16384 个 Token，并额外分配 4096 个 Token 作为软惩罚缓冲区。因此，生成的最大 Token 数被设定为 20480 个。软过长惩罚具体做法：预期长度之内，惩罚为0；缓冲区内，惩罚 $\frac{(L_{max} - L_{cache}) - \lvert y\rvert}{L_{cache}}$ 随长度增加惩罚线形从0加重至-1；超过最大长度，惩罚为-1
-- KL散度项移除：在训练长思维链推理模型时，策略模型分布（actor model）可能与初始模型（reference model）显著偏离，即“Base 到 LongCoT 本来变化大”。因此这种限制是没有必要的
-- 参考：
-- https://zhuanlan.zhihu.com/p/1899235750018541074
-- https://yam.gift/2025/08/14/NLP/LLM-Training/2025-08-14-Token-Level-GSPO-GMPO/
+GRPO 的 sample-level reduction 是：
+
+$$
+\frac{1}{G}\sum_i\frac{1}{\lvert o_i\rvert}\sum_t \ell_{i,t}.
+$$
+
+DAPO 改成：
+
+$$
+\frac{1}{\sum_i \lvert o_i\rvert}\sum_i\sum_t \ell_{i,t}.
+$$
+
+这个改变要看分母：GRPO 让每条 response 等权，DAPO 让每个 token 更接近等权。对于高质量长 CoT，长 response 不再被 $1/\lvert o_i\rvert$ 系统性压小；对于低质量长 response，重复和无效 token 也不会因为 response 很长而被弱化惩罚。
+
+Dr. GRPO 从同一类长度偏置出发，但做法不同。它指出 GRPO/PPO 的一些公开实现会在 masked mean 中引入 response-level length normalization，并且 group standard deviation normalization 会改变不同难度 prompt 的梯度尺度。Dr. GRPO 的修正是移除 length 和 std normalization，并用 generation budget 这样的常数分母替换 response length：
+
+$$
+J_{\text{Dr.GRPO}} \approx
+\frac{1}{G}\sum_{i=1}^{G}
+\frac{1}{L_{\max}}
+\sum_{t=1}^{\lvert o_i\rvert}\ell_{i,t},
+\quad
+\hat A_i = R_i-\frac{1}{G}\sum_{j=1}^{G}R_j.
+$$
+
+因此，DAPO 和 Dr. GRPO 在“长 response 不应被样本均值稀释”上是一致方向；但 DAPO 采用 batch token denominator，并额外引入 Clip-Higher、Dynamic Sampling 与 Overlong Reward Shaping；Dr. GRPO 更强调无偏 policy gradient、长度归一化和组内标准差归一化带来的优化偏差。
+
+#### Overlong Reward Shaping
+
+长 CoT 训练里，硬截断会制造很强的 reward noise：一个推理过程可能只是略超长度，就被截断、无法抽取答案、直接得到惩罚。模型接收到的信号变成“接近长度边界时 reward 突然翻转”。
+
+DAPO 的 Soft Overlong Punishment 把长度惩罚加到原始 rule-based reward 上。设期望最大长度为 $L_{target}$，软惩罚缓冲区为 $L_{cache}$，生成上限为 $L_{target}+L_{cache}$，response 长度为 $L_i$。惩罚项可以写成：
+
+$$
+p_{len}(L_i)=
+\begin{cases}
+0,& L_i\le L_{target}\\
+\frac{L_{target}-L_i}{L_{cache}},& L_{target}\lt L_i\le L_{target}+L_{cache}\\
+-1,& L_i\gt L_{target}+L_{cache}
+\end{cases}
+$$
+
+最终 reward 是：
+
+$$
+R_i^{shaped}=R_i^{rule}+p_{len}(L_i).
+$$
+
+这仍然是 response-level reward shaping：惩罚先作用在整条 response 的 reward 上，再通过 group advantage 影响所有 token。它和 PPO/RLHF 的 token-level KL shaping 不同；DAPO 没有用 critic 把长度惩罚递推成 token-specific advantage。
+
+```python
+    # rule_reward: [num_responses]，例如答案正确为 1，错误为 0 或 -1。
+    # response_len: [num_responses]，只统计生成回答 token。
+    over = response_len - target_len
+
+    # 目标长度内不惩罚；缓冲区内线性降到 -1；超过缓冲区保持 -1。
+    length_penalty = torch.zeros_like(rule_reward)
+    in_cache = (over > 0) & (over <= cache_len)
+    too_long = over > cache_len
+    length_penalty[in_cache] = -over[in_cache].float() / float(cache_len)
+    length_penalty[too_long] = -1.0
+
+    shaped_reward = rule_reward + length_penalty
+```
+
+DAPO 还移除了显式 KL penalty。它的判断是：长 CoT 从 base policy 迁移到 reasoning policy 时，分布本来可能需要明显偏离 reference；强 KL 约束会压制这种迁移。去掉 KL 后，稳定性更多依赖 Clip-Higher、动态采样、长度 reward shaping、entropy/length 监控和学习率等工程设置。
 
 <a id="cispo-minimax"></a>
 
-#### CISPO (Minimax)
+### CISPO (Minimax)
 
-##### 优化角度
+#### 优化对象
 
-CISPO (Clipped IS-weight Policy Optimization) 不再像 PPO/GRPO 那样通过 `min` 把某些 token update 的梯度变成 0，而是裁剪 importance sampling weight，并对该权重做 stop-gradient。这样所有 token 的 $\log \pi_\theta$ 梯度仍然参与训练，更新强度由 clipped IS weight 控制。
+CISPO (Clipped IS-weight Policy Optimization) 将 PPO/GRPO 的 clipped token update 改成 clipped importance sampling weight，并对该权重做 stop-gradient。所有 token 的 $\log \pi_\theta$ 梯度仍然参与训练，更新强度由 clipped IS weight 控制。
 
-##### 从 IS REINFORCE 到 CISPO 目标
+#### 粒度定位
+
+CISPO 仍然使用 token-level importance ratio：
+
+$$
+r_{i,t}(\theta)=
+\frac{\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})}
+{\pi_{\theta_{old}}(o_{i,t} \mid q,o_{i,\lt t})}.
+$$
+
+CISPO 调整 clip object，保留 token-level ratio。PPO/GRPO/DAPO 的 clipped surrogate 在有利方向越界后会把对应 token 的梯度截掉；CISPO 让 token 继续通过 $\nabla_\theta\log\pi_\theta(o_{i,t} \mid q,o_{i,\lt t})$ 参与训练，只把数值权重限制在 IS clip range 内。GSPO 调整 ratio granularity；CISPO 调整 token ratio 进入梯度的方式。
+
+#### 从 IS REINFORCE 到 CISPO 目标
 
 从带 IS 修正的 REINFORCE 看，off-policy minibatch 更新可以写成：
 
@@ -1206,13 +1381,13 @@ $$
 \hat{r}_{i,t}(\theta)=clip(r_{i,t}(\theta),1-\epsilon_{low}^{IS},1+\epsilon_{high}^{IS}).
 $$
 
-##### 代码实现
+#### 代码实现
 
 ```python
     # response_mask 只统计回答 token；adv_tokens 通常来自 group relative advantage。
     token_ratio = torch.exp(new_token_logp - old_token_logp)
 
-    # MiniMax-M1 报告中强调：裁剪 IS 权重，而不是裁剪 token update。
+    # MiniMax-M1 报告中强调裁剪 IS 权重，token update 仍通过 logprob 保留。
     # detach 对应公式中的 sg(.)，权重只作为数值重加权，不承接梯度。
     clipped_is_weight = token_ratio.clamp(1.0 - eps_low_is, 1.0 + eps_high_is).detach()
 
@@ -1221,19 +1396,19 @@ $$
     cispo_loss = -(token_objective * response_mask).sum() / response_mask.sum().clamp_min(1)
 ```
 
-##### 和 PPO/GRPO 的关键差异
+#### 和 PPO/GRPO 的差异
 
 1. PPO/GRPO 的 `min(unclipped, clipped)` 是 advantage-sign-dependent 的单边保守目标；当 token ratio 在“有利方向”越界时，对应 token 可能不再贡献梯度。
 2. CISPO 的 $\hat r$ 被 `detach`，所以 $\nabla_\theta J$ 主要来自 $\nabla_\theta\log\pi_\theta$；越界 token 仍参与训练，只是梯度权重被压到边界。
 3. 如果不裁剪 IS weight，CISPO 退化为带 stop-gradient IS 权重的标准 policy gradient；裁剪会引入轻微偏差，但换来低方差和长 response 中更高的 token 利用率。
 
-##### 实际操作问题
+#### 实际操作问题
 
 - **上界更关键。** MiniMax-M1 报告提到实验中主要调 $\epsilon^{IS}_{high}$，低界可设得较宽；因为他们更关心高 ratio token 的方差和爆炸风险。
 - **没有显式 KL penalty。** CISPO 和 DAPO/GSPO 一样，不把 reference KL 当主约束，稳定性更多依赖动态采样、长度惩罚、IS 权重范围和优化器设置。
 - **可能保留过多错误方向梯度。** 当某些 token 已经在坏方向上显著偏离旧策略时，CISPO 仍保留其梯度，只是缩小权重；这比 PPO 更高效，但也要求更谨慎地监控 entropy、clip fraction、梯度范数和重复输出。
 
-##### 统一 mask 视角
+#### 统一 mask 视角
 
 MiniMax-M1 还给出一个带 token-wise mask 的统一写法，用来表示“何时完全丢掉 token 梯度”。若 $M_{i,t}=1$ 恒成立，就是纯 CISPO；若 $M_{i,t}$ 模拟 PPO 的单边截断，就可以回到更保守的 token update 过滤。
 
@@ -1258,13 +1433,19 @@ $$
 
 <a id="gspo-qwen-2025"></a>
 
-#### GSPO (Qwen, 2025)
+### GSPO (Qwen, 2025)
 
-##### 优化角度
+#### 优化对象
 
-GSPO (Group Sequence Policy Optimization) 认为 GRPO 的 token-level importance ratio 用错了修正粒度：奖励是整条 response 的 sequence-level reward，但 GRPO 在每个 token 上分别做 off-policy correction。GSPO 把 ratio、clip、rewarding、optimization 都提升到 sequence level，让修正粒度和奖励粒度对齐。
+GSPO (Group Sequence Policy Optimization) 认为 GRPO 的 token-level importance ratio 用错了修正粒度：奖励和 group advantage 是整条 response 的 outcome signal，但 GRPO 在每个 token 上分别做 off-policy correction。GSPO 把 ratio、clip、rewarding、optimization 都提升到 sequence level，让似然比修正单位和 response-level outcome signal 对齐。
 
-##### 目标函数
+#### 粒度定位
+
+GSPO 的判断前提是：RLVR/RLHF 中的 outcome reward 往往是整条 response 的分数，尤其是数学答案 verifier 或 reward model 的 scalar score。PPO 为了 GAE 构造 token shaped reward；GRPO/GSPO 这种无 critic 目标里，组内优势 $\hat A_i$ 本身仍是 response-level scalar。
+
+GSPO 调整 ratio granularity：response-level advantage 评价整条 response，因此旧策略数据的修正也使用整条 response 的 likelihood ratio，避免每个 token 的局部 ratio 独立放大或截断这条 response-level 信号。
+
+#### 目标函数
 
 对同一个 prompt $x$ 采样 $G$ 条 response $\lbrace y_i \rbrace_{i=1}^{G}$，先做组内优势：
 
@@ -1288,7 +1469,7 @@ J_{GSPO}(\theta)=\mathbb{E}\left[
 \right]
 $$
 
-##### 长度归一化与代码实现
+#### 长度归一化与代码实现
 
 为什么要做长度归一化：完整 sequence likelihood 是所有 token 概率的乘积，长度越长越容易产生极端 ratio；取 $1/\lvert o_i\rvert$ 的几何平均后，不同长度 response 可以共享同一数量级的 clip range。
 
@@ -1302,14 +1483,14 @@ $$
     seq_ratio = torch.exp(seq_log_ratio)
     clipped_seq_ratio = seq_ratio.clamp(1.0 - clip_eps, 1.0 + clip_eps)
 
-    # response_adv 是组内 reward 标准化后的 sequence-level advantage。
+    # response_adv 是组内 reward 标准化后的 response-level advantage。
     seq_objective = torch.minimum(seq_ratio * response_adv, clipped_seq_ratio * response_adv)
 
-    # clip 判断发生在整条 response，而不是逐 token 判断。
+    # clip 判断以整条 response 为单位。
     gspo_loss = -seq_objective.mean()
 ```
 
-##### 梯度视角
+#### 梯度视角
 
 忽略 clip 时，GSPO 梯度近似为：
 
@@ -1318,7 +1499,7 @@ $$
 \mathbb{E}\left[
 \frac{1}{G}\sum_{i=1}^{G}
 s_i(\theta)\hat A_i
-\frac{1}{\lvert y_i\rvert}\sum_{t=1}^{\lvert y_i\rvert}
+\frac{1}{ \mid y_i \mid}\sum_{t=1}^{ \mid y_i \mid}
 \nabla_\theta \log\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})
 \right].
 $$
@@ -1329,15 +1510,15 @@ $$
 \nabla_\theta J_{GRPO}(\theta)=
 \mathbb{E}\left[
 \frac{1}{G}\sum_{i=1}^{G}\hat A_i
-\frac{1}{\lvert y_i\rvert}\sum_{t=1}^{\lvert y_i\rvert}
+\frac{1}{ \mid y_i \mid}\sum_{t=1}^{ \mid y_i \mid}
 \frac{\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})}{\pi_{\theta_{old}}(y_{i,t} \mid x,y_{i,\lt t})}
 \nabla_\theta \log\pi_\theta(y_{i,t} \mid x,y_{i,\lt t})
 \right].
 $$
 
-关键区别：GRPO 每个 token 被自己的 ratio 加权，长 response 中少数极端 token 会持续放大梯度噪声；GSPO 用整条 response 的同一个 $s_i$ 加权所有 token，降低 token-level ratio 方差。
+GRPO 每个 token 被自己的 ratio 加权，长 response 中少数极端 token 会持续放大梯度噪声；GSPO 用整条 response 的同一个 $s_i$ 加权所有 token，降低 token-level ratio 方差。
 
-##### GSPO-token
+#### GSPO-token
 
 论文还给出 token-level variant，用 sequence-level $s_i$ 的数值控制 clip，但通过 stop-gradient 构造 token-level 可反传项：
 
@@ -1364,7 +1545,7 @@ $$
     gspo_token_loss = -(token_obj * response_mask).sum() / response_mask.sum().clamp_min(1)
 ```
 
-##### 实际操作问题
+#### 实际操作问题
 
 - **MoE routing mismatch。** GSPO 论文指出 token-level ratio 对 MoE expert routing 变化很敏感；同一 response 在更新后可能激活不同 expert，导致 token ratio 波动。GSPO 只依赖 sequence likelihood，对单个 token likelihood 的敏感度更低，因此可以减少对 routing replay 的依赖。
 - **推理/训练精度差异。** 如果 rollout 由 vLLM/SGLang 等推理引擎生成，训练引擎重新算 token logprob 可能和推理时不完全一致。GSPO 使用 sequence-level likelihood，对这种细粒度差异更宽容。
@@ -1372,9 +1553,9 @@ $$
 
 <a id="reward-model-bradley-terry-偏好建模"></a>
 
-#### Reward Model：Bradley-Terry 偏好建模
+### Reward Model：Bradley-Terry 偏好建模
 
-##### 目标和公式
+#### 目标和公式
 
 目的：预测两个竞争者结果的概率模型，常用于处理成对比较的数据。 $p_i$ 是正实数分数，可以写成指数分数函数 $p_i=e^{\beta_i}$。
 
@@ -1387,7 +1568,7 @@ p(i\gt j) &= \frac{p_i}{p_i + p_j} \\
 \end{aligned}
 $$
 
-##### MLE 目标
+#### MLE 目标
 
 $$
 \mathrm{argmin}_{\beta} \sum_{i,j} -\log\sigma(\beta_i-\beta_j)
@@ -1395,7 +1576,7 @@ $$
 
 该目标鼓励 $\beta_i\gg\beta_j$。
 
-##### 训练数据和 BT likelihood
+#### 训练数据和 BT likelihood
 
 给定 prompt $x$ 根据人类偏好标注得到回答 $y_1 \succ y_2$，构建偏好数据集 $\mathcal{D} = \lbrace x^{(i)}, y_w^{(i)}, y_l^{(i)}\rbrace_{i=1}^{N}$，reward 模型需要预测出分数 $r^{\ast}(y, x)$。通过 BT 模型建模人类偏好分布：
 
@@ -1410,7 +1591,7 @@ $$
 $$
 
 ```python
-        # reward_model 对 prompt+response 输出一个 sequence-level scalar reward。
+        # reward_model 对 prompt+response 输出一个 response-level scalar reward。
         chosen_reward = reward_model(prompt_ids, chosen_response_ids)
         rejected_reward = reward_model(prompt_ids, rejected_response_ids)
 
@@ -1419,13 +1600,19 @@ $$
         reward_model_loss = -torch.nn.functional.logsigmoid(reward_margin).mean()
 ```
 
-##### 奖励颗粒度
+#### 奖励颗粒度
 
-- sequence-level: 整个回答一个分数 (PPO, GRPO)
-- token-level: 每个 token 独立分数，标注成本高，信用分配（解耦）难
-- step-level: 按推理步骤分段，需要步骤分割器
+Reward model 最常见的输出是 response-level scalar：完整 prompt+response 输入模型，最后得到 $r_\phi(x,y)$。这和语言模型训练里的 token logprob 不同；RM 不会天然告诉你第几个 token 贡献了偏好。
 
-##### 实际操作注意
+更细的 reward 粒度通常需要额外设计：
+
+1. **response-level reward**：整条回答一个分数，适合偏好标注、答案 verifier、格式 verifier，也是 PPO/RLHF 和 GRPO/RLVR 最常见的来源。
+2. **step-level reward**：按推理步骤打分，需要步骤切分、过程监督或 verifier 对中间结论的校验；它能改进 credit assignment，但标注与验证成本更高。
+3. **token-level reward**：每个 token 独立分数。人工偏好 RM 通常不天然输出这种信号；工程中更常见的做法是把 KL penalty 写成 token-level shaping。
+
+后续 PPO 的 critic/GAE 可以把 response-level reward 传播到 token-specific advantage；GRPO/GSPO 通常直接把 response-level advantage 复制到 token-shaped objective 或 sequence objective。训练 loss 按 token 求和，不代表原始 reward 来自 token-level 标注。
+
+#### 实际操作注意
 
 - 数据切分：训练集和验证集共享同一个 prompt，甚至共享部分回答。这样得到的 eval accuracy 会偏乐观，更稳妥的做法是按 prompt 切分
 - RM 分数尺度：RM 训练只关心分数差，不关心绝对尺度，但 PPO 阶段感受到的奖励尺度完全不同，PPO之前需要校准，常见做法是在固定校准集上做标准化
@@ -1433,15 +1620,15 @@ $$
 
 <a id="reinforcement-learning-from-human-feedback-rlhf"></a>
 
-#### Reinforcement Learning from Human Feedback (RLHF)
+### Reinforcement Learning from Human Feedback (RLHF)
 
-##### SFT 目标
+#### SFT 目标
 
 $$
 \mathcal{L}_{SFT} = -\mathbb{E}_{(x,y)\sim\mathcal{D}}[\log\pi_\theta(y \mid x)] \approx -\sum_{t=1}^{T} \log\pi_\theta(y_t \mid x,y_{\lt t})
 $$
 
-##### RLHF 目标
+#### RLHF 目标
 
 $$
 \mathcal{J}_{RLHF} = \mathbb{E}_{x\sim \mathcal{D}, y\sim\pi_\theta(\cdot \mid x)}[r_\phi(x,y)] - \beta D_{KL}(\pi_\theta(\cdot \mid x) \Vert \pi_{ref}(\cdot \mid x))
@@ -1449,27 +1636,32 @@ $$
 
 解释：让当前模型自己生成回答，用 RM 打分，再用 PPO 提高高分回答的概率，追求偏好奖励，同时别偏离 SFT 太远，用裁剪、优势估计和 KL 约束（k2 estimation）来稳定更新。
 
-##### LLM-RLHF 的 token-level reward
+#### LLM-RLHF 的 reward shaping
 
-Reward Model 往往只在完整回答 $y$ 结束后给一个分数 $r(x,y)$，为了让 PPO 能在 token 级别更新，工程上会把奖励拆成两部分：1. 每个 token 都有 KL 惩罚，防止偏离 reference; 2. 最后一个 token 或 EOS 位置加上 RM 的整段奖励。
+Reward Model 往往只在完整回答 $y$ 结束后给一个分数 $r_\phi(x,y)$。PPO 训练需要 token-level policy update，因此工程上把逐 token KL penalty 和最后位置的 RM reward 合成 shaped reward，再交给 critic/GAE 计算 token-specific advantage。完整公式见 [PPO 的 LLM token-level 目标](#目标函数llm-token-level-版本)。
 
-$$
-\begin{aligned}
-r_t^{token} &= -\beta(\log\pi_\theta(y_t \mid s_t) - \log\pi_{ref}(y_t \mid s_t)), \quad t \lt T \\
-&= r_\phi(x,y) - \beta(\log\pi_\theta(y_t \mid s_t) - \log\pi_{ref}(y_t \mid s_t)), \quad t = T
-\end{aligned}
-$$
+```python
+    # rm_reward: [batch]，完整 response 的 response-level reward。
+    # token_kl: [batch, max_len]，每个生成 token 的 log pi - log pi_ref。
+    shaped_reward = -beta_kl * token_kl
 
-##### 梯度颗粒度
+    # 只在最后一个有效 token 加上整段 RM reward。
+    last_index = response_mask.sum(dim=-1).long() - 1
+    shaped_reward[torch.arange(shaped_reward.size(0)), last_index] += rm_reward
 
-- token-level: 每个 token 有独立的梯度信号，虽然奖励仍然集中在末尾，但通过 Critic 估计每个位置的 value，计算出每个 token 独立的 advantage
-- sequence-level: 整条回答的所有 token 共用一个梯度信号，但其中真正决定质量的往往只有几个。如果所有 token 被平均更新，梯度信号就被大量无关 token 稀释了，模型需要把学习精力集中在真正重要的 token 上
+    # shaped_reward 进入 critic/GAE；policy loss 仍按 token ratio 和 token advantage 更新。
+    advantages = compute_gae(shaped_reward, values, response_mask, gamma, lam)
+```
+
+#### 梯度颗粒度
+
+PPO/RLHF 的 token-level 梯度来自 token-specific advantage 和 token ratio，RM 不直接给每个 token 打分。GRPO/GSPO 的 response-level 梯度方向来自 group advantage，再通过 token logprob 求和或 sequence-level ratio 进入参数更新。判断方法粒度时，同时检查 reward 来源、advantage 定义、ratio 定义和 loss 分母。
 
 <a id="direct-preference-optimization-dpo"></a>
 
-#### Direct Preference Optimization (DPO)
+### Direct Preference Optimization (DPO)
 
-##### 目标函数
+#### 目标函数
 
 $$
 \mathcal{L}_{DPO}(\pi_\theta;\pi_{ref}) = -\mathbb{E}_{x,y_w,y_l\sim \mathcal{D}}[\log \sigma(\beta\log\frac{\pi_\theta(y_w \mid x)}{\pi_{ref}(y_w \mid x)} - \beta\log\frac{\pi_\theta(y_l \mid x)}{\pi_{ref}(y_l \mid x)})]
@@ -1491,7 +1683,7 @@ $$
     dpo_loss = -torch.nn.functional.logsigmoid(logits).mean()
 ```
 
-##### 目标推导
+#### 目标推导
 
 从 RLHF 的目标开始：
 
@@ -1506,7 +1698,7 @@ $$
 \end{aligned}
 $$
 
-##### 推导动机
+#### 推导动机
 
 找到一个配分函数 $Z(x) = \sum_y \pi_{ref}(y \mid x)e^{\frac{1}{\beta}r(x,y)}$ 作为一个有效的概率分布的归一化系数：
 
@@ -1525,7 +1717,7 @@ p^{\ast}(y_1 \succ y_2 \mid x) &= \frac{e^{r^{\ast}(x, y_1)}}{e^{r^{\ast}(x, y_1
 \end{aligned}
 $$
 
-##### 为什么标准 RLHF(PPO) 更鲁棒？
+#### DPO 的退化风险与 PPO 对照
 
 - DPO的训练目标会导致过拟合，因为 rejected token 策略 $\pi_\theta(y_l \mid x)$ 会快速收敛到 0，导致 DPO sigmoid 概率不断接近 1，损失一直降低，但是没有对齐偏好。解决方案可以是 IPO，它把偏好概率拟合到一个固定 margin：
 
@@ -1536,20 +1728,20 @@ $$
 - 在DPO的推导中，最优策略是基于BT-Model形式下能得到最大的reward，在非DPO的优化中，存在其他的策略能够使得DPO Loss更低
 - 参考：https://zhuanlan.zhihu.com/p/692991235
 
-# Training-Inference Mismatch
+## Training-Inference Mismatch
 
-训练-推理不一致指训练阶段优化的分布、状态、奖励或系统实现，和最终推理/评测时模型真实面对的条件不一致。它不是一个单独 bug，而是一组会互相放大的错位。
+训练-推理不一致指训练阶段优化的分布、状态、奖励或系统实现，和最终推理/评测时模型真实面对的条件不一致。这类错位通常成组出现，并会互相放大。
 
-## 发生场景
+### 发生场景
 
-| 场景                          | 训练时看到什么                              | 推理/评测时面对什么                                | 典型后果                                                         |
-| ----------------------------- | ------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------- |
-| SFT teacher forcing           | 每一步条件是 gold prefix $y^{\ast}_{\lt t}$ | 每一步条件是模型自己生成的 prefix $\hat y_{\lt t}$ | 早期错误改变后续状态分布，形成 exposure bias                     |
-| Offline preference / DPO      | 固定偏好对来自人工数据或旧策略              | 当前策略会生成新的错误类型                         | 拒绝样本概率被压得很低但真实偏好未必提升，容易过拟合偏好数据     |
-| Online RLHF / RLVR            | 当前策略 rollout + RM/verifier 打分         | 部署时面对更宽 prompt 分布和不同采样设置           | 能发现当前策略错误，但也可能 reward hacking 或 verifier hacking  |
-| Token loss vs sequence reward | loss 按 token 聚合                          | 奖励通常只评价整段 response 或最终答案             | credit assignment 粗糙，关键 token 被平均稀释或被 ratio 噪声放大 |
-| 训练长度 vs 推理长度          | 固定 max length、截断或长度惩罚             | 用户可能给更长上下文、要求更长 CoT                 | 过长推理、重复循环、答案抽取失败、成本失控                       |
-| 推理引擎 vs 训练引擎          | rollout 可能由 vLLM/SGLang 生成             | 训练端重算 logprob、MoE routing 或数值精度不同     | token ratio 不稳定，clip fraction 异常，MoE 训练可能崩           |
+| 场景                          | 训练时看到什么                              | 推理/评测时面对什么                                | 典型后果                                                                                               |
+| ----------------------------- | ------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| SFT teacher forcing           | 每一步条件是 gold prefix $y^{\ast}_{\lt t}$ | 每一步条件是模型自己生成的 prefix $\hat y_{\lt t}$ | 早期错误改变后续状态分布，形成 exposure bias                                                           |
+| Offline preference / DPO      | 固定偏好对来自人工数据或旧策略              | 当前策略会生成新的错误类型                         | 拒绝样本概率被压得很低但真实偏好未必提升，容易过拟合偏好数据                                           |
+| Online RLHF / RLVR            | 当前策略 rollout + RM/verifier 打分         | 部署时面对更宽 prompt 分布和不同采样设置           | 能发现当前策略错误，但也可能 reward hacking 或 verifier hacking                                        |
+| Token loss vs response reward | policy loss、KL 或 GAE 在 token 上计算      | 奖励通常只评价整段 response 或最终答案             | reward shaping、loss aggregation 和 ratio granularity 若混用，会稀释关键 token 或放大 token ratio 噪声 |
+| 训练长度 vs 推理长度          | 固定 max length、截断或长度惩罚             | 用户可能给更长上下文、要求更长 CoT                 | 过长推理、重复循环、答案抽取失败、成本失控                                                             |
+| 推理引擎 vs 训练引擎          | rollout 可能由 vLLM/SGLang 生成             | 训练端重算 logprob、MoE routing 或数值精度不同     | token ratio 不稳定，clip fraction 异常，MoE 训练可能崩                                                 |
 
 SFT 的条件分布错位可以直接写成：
 
@@ -1557,26 +1749,26 @@ $$
 \mathcal{L}_{SFT} =-\sum_t\log\pi_\theta(y_t^{\ast} \mid x,y_{\lt t}^{\ast}), \quad \text{inference: } \hat y_t\sim\pi_\theta(\cdot \mid x,\hat y_{\lt t}).
 $$
 
-训练目标从未让模型在 $\hat y_{\lt t}$ 这个“自己犯错后的状态”上恢复；一旦早期 token 偏了，后面的状态分布就不是训练分布。这也是为什么只看 teacher-forced token accuracy 不能代表真实生成质量。
+训练目标没有覆盖 $\hat y_{\lt t}$ 这个“自己犯错后的状态”；一旦早期 token 偏了，后面的状态分布就会离开训练分布。teacher-forced token accuracy 因此不能代表真实生成质量。
 
-## 问题分析
+### 问题分析
 
 - **状态分布错位会递归放大。** 在 RL 记号里，策略改变会改变状态访问分布 $d^{\pi}(s)$；语言模型里状态就是 prefix。SFT/DPO 如果只在静态数据上训练，就很难覆盖当前策略生成的新 prefix。
-- **奖励粒度和梯度粒度不一致。** 整段 reward 只告诉模型“这条 response 好不好”，但 token-level update 要决定“哪些 token 该升/降”。PPO 用 critic/GAE 拆 token advantage，GRPO 让 response 内 token 共享 advantage，DAPO 改 token-level reduction，GSPO 改 sequence-level ratio，本质都在修这个粒度错位。
+- **奖励粒度和优化粒度不一致。** 整段 reward 只告诉模型“这条 response 好不好”，但训练目标还要决定 advantage 分到哪里、ratio 按什么单位修正、clip 截断哪个对象、loss 分母如何归一化。PPO 用 critic/GAE 把 response-level reward 与 token-level KL shaping 变成 token-specific advantage；GRPO 把 response-level advantage 复制成 token-shaped tensor；DAPO/Dr. GRPO 修 loss aggregation 的长度偏置；CISPO 修 clip object；GSPO 修 response-level outcome signal 与 token-level ratio 的单位错配。
 - **评测协议也是目标的一部分。** 温度、top-p、max tokens、答案抽取规则、verifier 宽严度都会改变最终分数。如果训练时 reward extractor 和评测时 answer parser 不一致，模型可能优化到一个评测不认的输出格式。
 - **工程实现会制造隐形 off-policy。** 用推理引擎生成 rollout，再用训练引擎重算 logprob；或者 MoE 模型更新后 routing 改变，都会让“同一个 token 的新旧概率比”不再只反映策略分布变化。GSPO 对 sequence likelihood 的依赖较低敏感度，就是在缓解这一类错位。
 - **越强的在线优化越需要防 reward hacking。** RLHF/RLVR 能让当前策略暴露真实错误，但策略也会主动搜索 reward/verifier 的漏洞。长回答偏好、格式投机、重复推理和“最终答案抽取”漏洞都属于这个范畴。
 
-## 改善方向
+### 改善方向
 
 - **SFT 阶段：让训练格式贴近推理格式。** 保持 chat template、system prompt、工具调用格式、EOS/stop token 和推理时一致；必要时加入模型生成前缀上的纠错数据或 DAgger/scheduled-sampling 风格的数据聚合。
 - **偏好学习阶段：区分 offline alignment 和 online correction。** DPO 适合利用高质量固定偏好对，但要监控 rejected logprob 过快塌缩；PPO/GRPO/RLVR 适合暴露当前策略错误，但必须加入 KL/clip、长度约束、verifier 对抗测试和 prompt-level dynamic sampling。
-- **RL 阶段：让 reward、advantage、ratio 的粒度一致。** 若奖励是 sequence-level，GRPO/GSPO 的 response-level advantage 更自然；若有 step-level verifier 或过程奖励，可以考虑 token/step advantage，但要避免 token-level ratio 方差主导训练。
+- **RL 阶段：逐项检查 reward、advantage、ratio、clip 和 loss reduction。** 若奖励是 response-level，response-level advantage 更自然；若继续使用 token-level ratio，需要监控 token ratio 方差和 clip fraction；若长 response 被样本均值稀释，要检查 loss denominator；若有 step-level verifier 或 process reward，再考虑 token/step advantage。
 - **长度控制：不要只靠硬截断。** 硬截断会把接近边界的合理推理变成噪声样本。DAPO 的 soft overlong punishment 是更平滑的做法；实际训练还应监控 response length 分位数、重复 n-gram、EOS 率和答案抽取失败率。
 - **评测阶段：固定协议并复用 verifier。** 同一模型在不同采样温度、max tokens、答案抽取规则下可能得到完全不同结论。训练日志和最终报告必须记录这些配置。
 
 ```python
-# 评测协议应该被当成实验对象保存，而不是散落在命令行参数里。
+# 评测协议需要作为实验对象保存，避免关键设置散落在命令行参数里。
 eval_protocol = {
     "temperature": 0.6,
     "top_p": 0.95,
@@ -1600,7 +1792,7 @@ for prompt in eval_prompts:
 
 一个实用判断：如果训练 loss 变好但评测分数不动，先不要急着调学习率。优先检查这四件事：rollout prompt 分布是否覆盖评测分布；reward/verifier 是否和评测 extractor 一致；长度分布是否漂移；新旧 logprob/ratio 是否受推理-训练引擎差异污染。
 
-# Mathematical tools behind algorithms
+## Mathematical tools behind algorithms
 
 ### Bellman expectation equation 推导
 
@@ -1673,23 +1865,21 @@ $$
 对任意两个 value function $u,v$：
 
 $$
-\begin{aligned}
-\lvert (Tu)(s)-(Tv)(s) \rvert &\le
+\begin{aligned} \mid (Tu)(s)-(Tv)(s) \mid &\le
 \max_a
-\left\lvert
-\gamma\sum_{s'}p(s' \mid s,a)(u(s')-v(s'))
-\right\rvert\\
+\left \mid \gamma\sum_{s'}p(s' \mid s,a)(u(s')-v(s'))
+\right \mid \\
 &\le
-\gamma\max_a\sum_{s'}p(s' \mid s,a)\|u-v\|_\infty\\
+\gamma\max_a\sum_{s'}p(s' \mid s,a)\ \mid u-v\ \mid _\infty\\
 &=
-\gamma\|u-v\|_\infty.
+\gamma\ \mid u-v\ \mid _\infty.
 \end{aligned}
 $$
 
 因此
 
 $$
-\|Tu-Tv\|_\infty\le\gamma\|u-v\|_\infty.
+\ \mid Tu-Tv\ \mid _\infty\le\gamma\ \mid u-v\ \mid _\infty.
 $$
 
 当 $\gamma\lt1$ 时， $T$ 是 contraction mapping，所以存在唯一不动点：
@@ -1787,143 +1977,93 @@ $$
 
 trajectory 形式更适合解释 REINFORCE/PPO 代码；discounted occupancy 形式更适合和 Bellman、actor-critic 的状态分布对齐。不同资料省略 $\frac{1}{1-\gamma}$ 时，通常是把常数吸收到学习率或采用未归一化 occupancy measure。
 
-### KL divergence directionality and estimators
+### PPO clip 单边裁剪梯度符号
 
-KL divergence 衡量“用分布 $q$ 编码真实分布 $p$ 会多付出多少信息长度”。它不是对称距离，方向会改变优化行为。这个方向性在 RLHF、DPO、TRPO/PPO 的 KL 约束里非常重要。
-
-Forward KL 是：
+令单个 token/action 的当前 logprob 为：
 
 $$
-D_{KL}(p \Vert q)
-=
-\mathbb{E}_{x\sim p}
-\left[
-\log\frac{p(x)}{q(x)}
-\right].
+z_t=\log\pi_\theta(a_t \mid s_t),
+\quad
+z_t^{old}=\log\pi_{old}(a_t \mid s_t),
+\quad
+r_t(\theta)=\exp(z_t-z_t^{old}).
 $$
 
-如果把 $p$ 当作真实分布、 $q$ 当作近似分布，forward KL 的权重来自 $p(x)$。在 $p(x)$ 大的区域， $q(x)$ 不能太小，否则代价会很大；在 $p(x)$ 小的区域， $q(x)$ 的影响较弱。因此 forward KL 往往是 zero avoiding / mode covering：它倾向于让 $q$ 覆盖 $p$ 的主要概率质量。当 $p$ 是多峰分布而 $q$ 只能是单峰分布时，forward KL 常会让 $q$ 变得更宽，试图覆盖多个峰。
-
-Reverse KL 是：
+旧策略 logprob 在本轮更新中是常数，因此：
 
 $$
-D_{KL}(q \Vert p)
-=
-\mathbb{E}_{x\sim q}
-\left[
-\log\frac{q(x)}{p(x)}
-\right].
+\frac{\partial r_t}{\partial z_t}=r_t.
 $$
 
-Reverse KL 的权重来自 $q(x)$。如果 $p(x)$ 很小而 $q(x)$ 不小，代价会非常大；但 $p(x)$ 大而 $q(x)$ 小的区域不会被强烈惩罚。因此 reverse KL 往往是 zero forcing / mode seeking：它倾向于避开 $p$ 的低概率区域，宁愿选择一个窄峰。RLHF 中常见的 reference KL 如果写成 $D_{KL}(\pi_\theta \Vert \pi_{ref})$，就是把当前策略当作 $q$、reference policy 当作 $p$ 的 reverse KL。
-
-KL estimator 常见于 PPO/GRPO/RLHF 的 token-level KL 监控。考虑 reverse KL：
+PPO 最大化单 token surrogate：
 
 $$
-D_{KL}(q \Vert p)
-=
-\mathbb{E}_{x\sim q}
-\left[
-\log\frac{q(x)}{p(x)}
-\right].
+J_t(\theta)=
+\min\left(
+r_t A_t,
+\mathrm{clip}(r_t,1-\epsilon,1+\epsilon)A_t
+\right).
 $$
 
-定义 likelihood ratio：
+实际训练通常最小化 loss：
 
 $$
-\delta(x)=\frac{p(x)}{q(x)}.
+\ell_t(\theta)=-J_t(\theta).
 $$
 
-则 reverse KL 可以写成：
+当优势为正时，采样到的 token/action 比平均水平好，策略应提高它的概率。此时：
 
 $$
-D_{KL}(q \Vert p)=\mathbb{E}_{x\sim q}[-\log \delta(x)].
+J_t(\theta)=
+\begin{cases}
+r_t A_t,& r_t\le 1+\epsilon\\
+(1+\epsilon)A_t,& r_t\gt 1+\epsilon
+\end{cases}
 $$
 
-**$k_1 = -\log \delta(x)$.** 这是直接按照定义得到的无偏估计：
+对应的 loss 梯度是：
 
 $$
-\mathbb{E}_{x\sim q}[k_1]
-=
-D_{KL}(q \Vert p).
+\frac{\partial \ell_t}{\partial z_t}=
+\begin{cases}
+-A_t r_t,& r_t\le 1+\epsilon\\
+0,& r_t\gt 1+\epsilon
+\end{cases}
 $$
 
-问题是 $k_1$ 的单样本值可能为负，而 KL 的总体期望非负；这会带来较大方差，训练日志也不直观。
-
-**$k_2 = \frac{1}{2}(\log \delta(x))^{2}$.** 它恒为非负，方差通常更低，但只是在 $p$ 和 $q$ 接近时近似 KL。可以从 $f$-divergence 的二阶展开理解：
+在 $A_t\gt0$ 且 $r_t\lt1-\epsilon$ 的区域，新策略把好 token 的概率降得过多。此时梯度 $\frac{\partial \ell_t}{\partial z_t}=-A_t r_t\lt0$，梯度下降更新：
 
 $$
-D_f(p,q)
-=
-\mathbb{E}_{x\sim q}
-\left[
-f\left(\frac{p(x)}{q(x)}\right)
-\right].
+z_t \leftarrow z_t-\eta\frac{\partial \ell_t}{\partial z_t}
 $$
 
-当 $q$ 接近 $p$ 且 $f$ 可微时， $f$-divergence 在局部二阶意义上相似：
+会增大 $z_t$，也就是增大 $\pi_\theta(a_t \mid s_t)$，把 ratio 往上拉回合理区间。这里的“惩罚”指错误方向的更新继续承担 loss 梯度；该梯度会把概率推回 advantage 指定的方向。
+
+当优势为负时，采样到的 token/action 比平均水平差，策略应降低它的概率。此时：
 
 $$
-D_f(p_0,p_\theta)
-=
-\frac{f''(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
+J_t(\theta)=
+\begin{cases}
+(1-\epsilon)A_t,& r_t\lt 1-\epsilon\\
+r_t A_t,& r_t\ge 1-\epsilon
+\end{cases}
 $$
 
-其中 $F$ 是 Fisher information matrix。KL 对应 $f(x)=-\log x$， $k_2$ 对应 $f(x)=\frac{1}{2}(\log x)^2$；二者在 $\delta(x)\approx 1$ 时二阶项一致。
-
-**$k_3 = \delta(x) - 1 - \log \delta(x) = \delta(x)-1+k_1$.** 它利用了一个期望为 0 的 control variate：
+对应的 loss 梯度是：
 
 $$
-\begin{aligned}
-\mathbb{E}_{x\sim q}[\delta(x)-1]
-&=
-\mathbb{E}_{x\sim q}
-\left[
-\frac{p(x)}{q(x)}-1
-\right]\\
-&=
-\int q(x)\left(\frac{p(x)}{q(x)}-1\right)dx\\
-&=
-\int p(x)dx-\int q(x)dx\\
-&=0.
-\end{aligned}
+\frac{\partial \ell_t}{\partial z_t}=
+\begin{cases}
+0,& r_t\lt 1-\epsilon\\
+-A_t r_t,& r_t\ge 1-\epsilon
+\end{cases}
 $$
 
-因此 $k_3$ 仍然是无偏估计：
-
-$$
-\mathbb{E}_{x\sim q}[k_3]
-=
-D_{KL}(q \Vert p).
-$$
-
-同时由 $\delta-1-\log\delta\ge0$ 可知， $k_3$ 的单样本值非负；在 $\delta\approx1$ 时，
-
-$$
-\delta-1-\log\delta
-\approx
-\frac{1}{2}(\delta-1)^2.
-$$
-
-所以 $k_3$ 常被用作兼顾无偏性、低方差和非负单样本值的 KL estimator。GRPO 中的 token-level KL 估计通常就采用这个形式：
-
-$$
-\hat D_{KL}
-=
-\frac{\pi_{ref}(o_t \mid q,o_{\lt t})}
-{\pi_\theta(o_t \mid q,o_{\lt t})}
--
-\log
-\frac{\pi_{ref}(o_t \mid q,o_{\lt t})}
-{\pi_\theta(o_t \mid q,o_{\lt t})}
--1.
-$$
-
-参考：[Approximating KL Divergence](http://joschu.net/blog/kl-approx.html)。
+在 $A_t\lt0$ 且 $r_t\gt1+\epsilon$ 的区域，新策略把坏 token 的概率升得过多。此时 $\frac{\partial \ell_t}{\partial z_t}=-A_t r_t\gt0$，梯度下降会减小 $z_t$，也就是降低 $\pi_\theta(a_t \mid s_t)$，把 ratio 往下拉回合理区间。
 
 ### TRPO trust-region 二阶近似
 
-TRPO 的原始约束优化是：
+TRPO 的约束优化写成：
 
 $$
 \max_\theta L_{\theta_{old}}(\theta)
@@ -1933,32 +2073,28 @@ $$
 \bar D_{KL}(\theta_{old},\theta)\le\delta.
 $$
 
-为了得到一个可求解的局部问题，在 $\theta_{old}$ 附近令 $x=\theta-\theta_{old}$。对 surrogate objective 做一阶近似：
+在 $\theta_{old}$ 附近对目标做一阶近似、对 KL 做二阶近似：
 
 $$
-L_{\theta_{old}}(\theta)
-\approx
-L_{\theta_{old}}(\theta_{old})+g^{T}x,
+L_{\theta_{old}}(\theta)\approx
+L_{\theta_{old}}(\theta_{old})+g^{T}(\theta-\theta_{old}),
 $$
 
-其中
+$$
+\bar D_{KL}(\theta_{old},\theta)\approx
+\frac{1}{2}(\theta-\theta_{old})^{T}A(\theta-\theta_{old}),
+$$
+
+其中 $A$ 是 KL Hessian，也就是 Fisher information matrix 的经验近似；一阶项为：
 
 $$
 g=
 \left.
 \nabla_\theta L_{\theta_{old}}(\theta)
-\right\rvert_{\theta=\theta_{old}}.
+\right \mid _{\theta=\theta_{old}}
 $$
 
-对平均 KL 做二阶近似：
-
-$$
-\bar D_{KL}(\theta_{old},\theta)
-\approx
-\frac{1}{2}x^{T}Ax,
-$$
-
-其中 $A$ 是平均 KL 的 Hessian，也可以看作 Fisher information matrix 的经验近似。于是局部问题变成：
+于是局部问题变成：
 
 $$
 \max_x g^{T}x
@@ -1968,97 +2104,191 @@ $$
 \frac{1}{2}x^{T}Ax\le\delta.
 $$
 
-用 Lagrangian 求解：
+其方向与自然梯度一致：
 
 $$
-\mathcal{L}(x,\lambda)
-=
-g^{T}x
--
-\lambda\left(\frac{1}{2}x^{T}Ax-\delta\right).
+s\approx A^{-1}g.
 $$
 
-对 $x$ 求导并令其为 0：
+大模型里通常不显式形成 $A^{-1}$；实现上用 conjugate gradient 和 Fisher-vector product 近似求解 $As=g$。步长由 KL 约束给出：
 
 $$
-g-\lambda Ax=0
-\quad\Rightarrow\quad
-x=\frac{1}{\lambda}A^{-1}g.
-$$
-
-这说明最优方向是自然梯度方向。令
-
-$$
-s=A^{-1}g,
-$$
-
-再由 KL 约束确定缩放系数：
-
-$$
-\frac{1}{2}(\beta s)^{T}A(\beta s)=\delta
-\quad\Rightarrow\quad
 \beta=\sqrt{\frac{2\delta}{s^{T}As}}.
 $$
 
-所以局部二次近似下的候选更新是：
-
-$$
-\theta_{candidate}
-=
-\theta_{old}
-+\sqrt{\frac{2\delta}{s^{T}As}}s.
-$$
-
-实际深度网络不会显式形成 $A$ 或 $A^{-1}$。TRPO 使用 conjugate gradient 近似求解线性系统：
-
-$$
-As=g,
-$$
-
-其中矩阵向量积 $Av$ 通过 Fisher-vector product 得到。这个过程只需要计算 KL Hessian 对向量的乘积，不需要存下完整 Hessian。
-
-最后还需要 backtracking line search。从 $\theta_{candidate}$ 开始，如果真实 surrogate 没有提升，或者真实平均 KL 超过 $\delta$，就把步长乘以一个衰减系数继续尝试：
-
-$$
-\theta_{new}
-=
-\theta_{old}
-+\alpha\beta s,
-\quad
-\alpha\in\lbrace 1,\eta,\eta^2,\dots\rbrace.
-$$
-
-这里 line search 不是工程装饰，而是在补偿二阶近似误差、有限 batch 估计误差、神经网络非线性和优化器数值误差。没有这一步，局部二次模型给出的“可行”更新在真实策略空间里可能已经越过 trust region。
-
-参考：[TRPO 原文](https://arxiv.org/abs/1502.05477)、[动手学强化学习 TRPO 章节](https://hrl.boyuai.com/chapter/2/trpo%E7%AE%97%E6%B3%95#113-%E8%BF%91%E4%BC%BC%E6%B1%82%E8%A7%A3)、[TRPO 深度拆解](https://yam.gift/2026/05/11/NLP/LLM-Training/2026-05-11-TRPO/)。
+最后 TRPO 做 line search：从 $\theta_{old}+\beta s$ 开始逐步缩小步长，直到 surrogate objective 改善且真实平均 KL 不超过 $\delta$。没有这个 line search，二阶近似误差可能让一次更新跨出 trust region，造成性能崩塌。
 
 ### Bradley-Terry preference model
 
-Bradley-Terry model 用于建模成对偏好。给定两个回答 $i$ 和 $j$，如果它们的隐含分数分别是 $\beta_i$ 和 $\beta_j$，那么 $i$ 优于 $j$ 的概率为：
+Bradley-Terry model 用于建模 pairwise preference。给定两个候选项的分数，它把“A 优于 B”的概率写成两个正分数的归一化比例；DPO 和 reward model 训练都会用到这个比较式建模视角。
 
 $$
-Pr(i\gt j)
-=
-\frac{e^{\beta_i}}{e^{\beta_i}+e^{\beta_j}}
-=
-\frac{1}{1+e^{-(\beta_i-\beta_j)}}
-=
-\sigma(\beta_i-\beta_j).
+Pr(i\gt j) = \frac{p_i}{p_i + p_j} = \frac{e^{\beta_i}}{e^{\beta_i} + e^{\beta_j}} = \frac{1}{1 + e^{-(\beta_i - \beta_j)}} = \sigma(\beta_i - \beta_j),
 $$
 
-偏好模型只关心分数差，而不关心两个分数的共同平移。常见 loss 是：
+$p_i$ 是 $i$ 的正实数分数， $p_i = e^{\beta_i}$ 是对应的指数分数函数
+
+对应 loss 是：
 
 $$
-\mathcal{L}_{BT}
-=
--\log\sigma(\beta_i-\beta_j).
+y(x) = -\log \sigma(x) = -\log \sigma(\beta_i - \beta_j).
 $$
 
-当 $\beta_i-\beta_j\rightarrow+\infty$ 时，loss 趋近于 0；当 $\beta_i-\beta_j\rightarrow-\infty$ 时，loss 迅速增大。DPO 的推导正是把 reward difference 替换成策略相对 reference policy 的 log-ratio difference，从而绕开显式 reward model。
+当分数差趋向正无穷时，loss 趋向 0；当分数差趋向负无穷时，loss 趋向正无穷。
 
-### Statistics related identities
+### KL divergence 的非对称性
 
-**Chain rule of conditional probability.**
+设目标分布为 $p$，近似分布为 $q$。正向 KL 和反向 KL 权重不同，因此在多峰分布上会产生不同的覆盖行为。
+
+#### 正向 KL
+
+- 权重 $p(x)$
+- 在 $p(x)$ 大的地方，想让 KL 散度小，就需要 $q(x)$ 的值也尽量大；在 $p(x)$ 小的地方， $q(x)$ 对整体影响不大
+- 要想使正向 KL 散度最小，则要求在 $p(x)$ 不为 0 的地方， $q(x)$ 也尽量不为 0，所以正向 KL 散度被称为是 zero avoiding
+- 得到的分布 $q(x)$ 是一个比较 “宽” 的分布
+
+$$
+q^{\ast} = \mathrm{argmin}_q D_{KL}(p \Vert q) = \mathrm{argmin}_q p(x) \log\frac{p(x)}{q(x)}
+$$
+
+#### 反向 KL
+
+- 权重 $q(x)$
+- 在 $p(x)$ 小的地方，想让 KL 散度小，就需要 $q(x)$ 的值也尽量小；在 $p(x)$ 大的地方，可以适当忽略
+- 要想使反向 KL 散度最小，则要求在 $p(x)$ 为 0 的地方， $q(x)$ 也尽量为 0，所以反向 KL 散度被称为是 zero forcing
+- 得到的分布 $q(x)$ 是一个比较 “窄” 的分布
+
+$$
+q^{\ast} = \mathrm{argmin}_q D_{KL}(q \Vert p) = \mathrm{argmin}_q q(x) \log\frac{q(x)}{p(x)}
+$$
+
+#### 两峰混合分布例子
+
+令真实分布 `p` 是两个高斯分布的混合，令近似分布 `q` 为单个高斯分布。两种 KL 的典型行为是：
+
+- 正向：更在意真实分布 `p` 中的常见事件，也就是两峰，需要让这些高概率区域在 `q` 中保持足够概率质量。当 `p` 具有多个峰时，`q` 倾向于覆盖多个峰，得到较宽的近似分布。
+- 反向：更在意 `q` 自己放置概率质量的位置，需要避免把质量放到 `p` 的低概率谷底。当 `p` 具有多个相隔较远的峰时，最小化反向 KL 常选择单个峰，得到较窄的近似分布。
+
+### KL divergence estimation
+
+考虑反向 KL 散度。设当前采样分布为 $q$，参考分布为 $p$，样本 $x\sim q$，并定义：
+
+$$
+\delta(x)=\frac{p(x)}{q(x)}.
+$$
+
+则：
+
+$$
+D_{KL}(q \Vert p) = \sum_x q(x)\log\frac{q(x)}{p(x)} = \mathbb{E}_{x\sim q} \left[ \log\frac{q(x)}{p(x)} \right]
+$$
+
+也就是：
+
+$$
+D_{KL}(q \Vert p)=\mathbb{E}_{x\sim q}[-\log\delta(x)].
+$$
+
+常见 estimator 可以写成：
+
+$$
+k_1(x)=-\log\delta(x).
+$$
+
+$$
+k_2(x)=\frac{1}{2}\left(\log\delta(x)\right)^2.
+$$
+
+$$
+k_3(x)=\delta(x)-1-\log\delta(x).
+$$
+
+| estimator | 期望        | 单样本符号 | 方差/偏差                      | 常见用途                                                   |
+| --------- | ----------- | ---------- | ------------------------------ | ---------------------------------------------------------- |
+| `k1`      | 无偏估计 KL | 可正可负   | 无偏但方差较高                 | PPO/RLHF 的 sampled log-ratio KL penalty；也可作为 KL 监控 |
+| `k2`      | 二阶近似 KL | 非负       | 有偏，分布接近时偏差小，方差低 | approximate KL、early stopping、诊断指标                   |
+| `k3`      | 无偏估计 KL | 非负       | 无偏且通常低方差               | GRPO/DeepSeekMath 这类 token-level KL regularizer          |
+
+`k1` 直接来自 KL 定义，因此无偏：
+
+$$
+\begin{aligned}
+\mathbb{E}_{x\sim q}[k_1(x)]
+&= \mathbb{E}_{x\sim q}[-\log\delta(x)]\\
+&= D_{KL}(q\Vert p).
+\end{aligned}
+$$
+
+它的缺点是单样本值可以为负。KL 的期望非负，但某个 token 上如果参考策略概率高于当前策略概率，就会出现负样本值；这会增加方差。
+
+`k2` 来自二阶近似。考虑 $f$-divergence：
+
+$$
+D_f(p,q) = \mathbb{E}_{x\sim q} \left[ f\left(\frac{p(x)}{q(x)}\right) \right]
+$$
+
+当 $q$ 接近 $p$ 时，不同 $f$-divergence 的二阶项都由 Fisher information 控制。对参数化分布 $p_\theta$：
+
+$$
+D_f(p_0,p_\theta) = \frac{f''(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
+$$
+
+其中 $F$ 是 Fisher information matrix。KL 散度对应 $f(x)=-\log x$，`k2` 对应的二阶曲率相同，因此当两个分布很接近时：
+
+$$
+k_2(x)=\frac{1}{2}\left(\log\delta(x)\right)^2
+$$
+
+可以作为 KL 的低方差近似。它有偏，不适合需要无偏 KL regularizer 的地方；但因为非负、平滑、实现简单，常用于 approximate KL 或 early stopping。
+
+`k3` 在 `k1` 上加入 control variate：
+
+$$
+k_3(x)=k_1(x)+\delta(x)-1.
+$$
+
+新增项期望为 0：
+
+$$
+\begin{aligned}
+\mathbb{E}_{x\sim q}[\delta(x)-1]
+&= \int q(x) \left(\frac{p(x)}{q(x)} - 1\right) dx \\
+&= \int p(x) dx - \int q(x) dx \\
+&=0.
+\end{aligned}
+$$
+
+因此 `k3` 仍然无偏估计 KL。同时，由凸性不等式 $x-1-\log x\ge0$ 可知：
+
+$$
+k_3(x)\ge0.
+$$
+
+它同时具备无偏和单样本非负两个性质，方差通常也低于 `k1`。当 KL 项直接作为 token-level objective regularizer 时，`k3` 更适合稳定训练。
+
+#### 梯度和算法选择
+
+PPO/RLHF 的 shaped reward 常用 `k1` 形式。对 token $y_t$，常见 KL penalty 是：
+
+$$
+\log\pi_\theta(y_t \mid s_t)-\log\pi_{ref}(y_t \mid s_t).
+$$
+
+把当前策略视为采样分布 $q$、reference 视为 $p$，这个 penalty 对应 $-\log\delta$。它通常先作为 reward shaping 数值进入 GAE，actor 更新时通过固定的 advantage 和 PPO ratio 起作用；很多实现不会把这项作为独立 KL loss 直接反传。`k1` 的优势是形式简单，并且和 KL-penalized RLHF 目标直接对齐；代价是 token 级样本值可负、方差较高。
+
+GRPO/DeepSeekMath 的 KL 项在 objective 中作为 token-level regularizer 出现，常用 `k3`：
+
+$$
+\frac{\pi_{ref}(y_t \mid s_t)}{\pi_\theta(y_t \mid s_t)} - \log\frac{\pi_{ref}(y_t \mid s_t)}{\pi_\theta(y_t \mid s_t)} -1.
+$$
+
+这里 KL 不进入 group reward 标准化，也不生成 group advantage。`k3` 的非负性和低方差更适合放在 token loss 中持续约束策略漂移。
+
+`k2` 更常见于近似 KL 监控或 early stopping。它在新旧策略很接近时很好用，但有偏；如果训练目标需要精确的 KL regularizer，通常优先选 `k1` 或 `k3`。
+
+### Probability identities
+
+#### Chain rule of conditional probability
 
 $$
 \begin{aligned}
@@ -2067,7 +2297,7 @@ p(x \mid a) &= \sum_b p(x, b \mid a) \quad \text{law of total (cond) prob}\\
 \end{aligned}
 $$
 
-**Law of total expectation.**
+#### Law of total expectation
 
 $$
 \begin{aligned}
@@ -2078,7 +2308,7 @@ $$
 \end{aligned}
 $$
 
-**Law of total conditional expectation.**
+#### Law of total conditional expectation
 
 $$
 \begin{aligned}

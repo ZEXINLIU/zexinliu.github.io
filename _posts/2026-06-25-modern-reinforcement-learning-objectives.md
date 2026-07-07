@@ -2230,7 +2230,7 @@ $$
 当 $q$ 接近 $p$ 时，不同 $f$-divergence 的二阶项都由 Fisher information 控制。对参数化分布 $p_\theta$：
 
 $$
-D_f(p_0,p_\theta) = \frac{f^{\prime}'(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
+D_f(p_0,p_\theta) = \frac{f^{\prime\prime}(1)}{2}\theta^{T}F\theta+O(\theta^{3}),
 $$
 
 其中 $F$ 是 Fisher information matrix。KL 散度对应 $f(x)=-\log x$，`k2` 对应的二阶曲率相同，因此当两个分布很接近时：

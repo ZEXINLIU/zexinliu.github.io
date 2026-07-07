@@ -1865,21 +1865,24 @@ $$
 对任意两个 value function $u,v$：
 
 $$
-\begin{aligned} \mid (Tu)(s)-(Tv)(s) \mid &\le
-\max_a
-\left \mid \gamma\sum_{s^{\prime}}p(s^{\prime} \mid s,a)(u(s^{\prime})-v(s^{\prime}))
-\right \mid \\
+\begin{aligned}
+\lvert (Tu)(s)-(Tv)(s) \rvert
 &\le
-\gamma\max_a\sum_{s^{\prime}}p(s^{\prime} \mid s,a)\ \mid u-v\ \mid _\infty\\
+\max_a
+\left\lvert
+\gamma\sum_{s^{\prime}}p(s^{\prime} \mid s,a)(u(s^{\prime})-v(s^{\prime}))
+\right\rvert \\
+&\le
+\gamma\max_a\sum_{s^{\prime}}p(s^{\prime} \mid s,a)\lVert u-v\rVert_\infty\\
 &=
-\gamma\ \mid u-v\ \mid _\infty.
+\gamma\lVert u-v\rVert_\infty.
 \end{aligned}
 $$
 
 因此
 
 $$
-\ \mid Tu-Tv\ \mid _\infty\le\gamma\ \mid u-v\ \mid _\infty.
+\lVert Tu-Tv\rVert_\infty\le\gamma\lVert u-v\rVert_\infty.
 $$
 
 当 $\gamma\lt1$ 时， $T$ 是 contraction mapping，所以存在唯一不动点：
@@ -2091,7 +2094,7 @@ $$
 g=
 \left.
 \nabla_\theta L_{\theta_{old}}(\theta)
-\right \mid _{\theta=\theta_{old}}
+\right\rvert_{\theta=\theta_{old}}.
 $$
 
 于是局部问题变成：

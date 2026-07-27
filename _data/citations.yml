@@ -1,12 +1,12 @@
 metadata:
-  last_updated: '2026-07-10'
+  last_updated: '2026-07-27'
 papers:
   ViwJ6FoAAAAJ:2osOgNQ5qMEC:
     citations: 2
     title: Uncertainty quantification in brain stimulation using uncertainSCI
     year: '2021'
   ViwJ6FoAAAAJ:9yKSN-GCB0IC:
-    citations: 0
+    citations: 1
     title: Adaptive Surrogate Model for Failure Probability Estimation
     year: '2021'
   ViwJ6FoAAAAJ:UeHWp8X0CEIC:

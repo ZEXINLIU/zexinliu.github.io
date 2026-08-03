@@ -1,5 +1,5 @@
 metadata:
-  last_updated: '2026-07-27'
+  last_updated: '2026-08-03'
 papers:
   ViwJ6FoAAAAJ:2osOgNQ5qMEC:
     citations: 2
@@ -23,10 +23,10 @@ papers:
     year: '2024'
   ViwJ6FoAAAAJ:eQOLeE2rZwMC:
     citations: 10
-    title: 'UncertainSCI: a Python package for noninvasive parametric uncertainty quantification of simulation pipelines'
+    title: 'UncertainSCI: A Python package for noninvasive parametric uncertainty quantification of simulation pipelines'
     year: '2023'
   ViwJ6FoAAAAJ:u-x6o8ySG0sC:
-    citations: 13
+    citations: 14
     title: Using UncertainSCI to Quantify Uncertainty in Cardiac Simulations
     year: '2020'
   ViwJ6FoAAAAJ:u5HHmVD_uO8C:
